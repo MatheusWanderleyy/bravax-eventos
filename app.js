@@ -1091,11 +1091,6 @@ function setupListeners() {
     renderFornecedores(); document.getElementById('dlgFornecedores').showModal();
   });
 
-  document.getElementById('btnExportar')?.addEventListener('click', exportarDados);
-  document.getElementById('importFile')?.addEventListener('change', e => {
-    importarDados(e.target.files?.[0]);
-    e.target.value = '';
-  });
 
   document.getElementById('btnConfigIA')?.addEventListener('click', () => {
     document.getElementById('modeloVisao').value = aiCfg.modeloVisao || 'llava';
@@ -1152,38 +1147,6 @@ function setupListeners() {
 
   // WhatsApp
   document.getElementById('btnAbrirWA')?.addEventListener('click', abrirWhatsApp);
-}
-
-// ─── EXPORTAR / IMPORTAR ─────────────────────────────────────────
-
-function exportarDados() {
-  const dados = localStorage.getItem(STORE_KEY) || JSON.stringify(state);
-  const blob  = new Blob([dados], { type: 'application/json' });
-  const url   = URL.createObjectURL(blob);
-  const a     = document.createElement('a');
-  const hoje  = new Date().toISOString().split('T')[0];
-  a.href = url; a.download = `bravax-dados-${hoje}.json`;
-  a.click(); URL.revokeObjectURL(url);
-}
-
-function importarDados(file) {
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = e => {
-    try {
-      const dados = JSON.parse(e.target.result);
-      if (!dados.eventos || !dados.fornecedores) throw new Error('Arquivo inválido');
-      if (!confirm(`Importar ${dados.eventos.length} evento(s) e ${dados.fornecedores.length} fornecedor(es)? Os dados atuais serão substituídos.`)) return;
-      localStorage.setItem(STORE_KEY, JSON.stringify(dados));
-      state = dados;
-      selectedId = state.eventos[0]?.id || null;
-      renderAll();
-      alert('✓ Dados importados com sucesso!');
-    } catch {
-      alert('Arquivo inválido. Use apenas arquivos exportados por este sistema.');
-    }
-  };
-  reader.readAsText(file);
 }
 
 // ─── INIT ────────────────────────────────────────────────────────
