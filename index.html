@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Bravax Protege</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<div class="app">
+
+  <!-- ─── PAINEL ESQUERDO ─── -->
+  <aside class="left-panel">
+    <div class="left-header">
+      <div class="brand">
+        <div class="brand-mark">
+          <img src="assets/logo-bravax.png" alt="BP" onerror="this.style.display='none';this.parentElement.textContent='BP'" />
+        </div>
+        <span>Bravax Protege</span>
+      </div>
+      <button class="btn-new" id="btnNovoEvento">+ Evento</button>
+    </div>
+
+    <div class="search-wrap">
+      <input id="searchInput" type="search" placeholder="Buscar placa ou nome…" autocomplete="off" />
+    </div>
+
+    <div id="eventList" class="event-list"></div>
+
+    <div class="left-footer">
+      <button class="footer-btn" id="btnFornecedores">👥 Fornecedores</button>
+      <button class="footer-btn" id="btnConfigIA"><span id="aiDot">○</span> Config. IA</button>
+      <button class="footer-btn footer-btn-dim" id="btnRestaurar">↺ Restaurar demo</button>
+    </div>
+  </aside>
+
+  <!-- ─── PAINEL DIREITO ─── -->
+  <main class="right-panel" id="rightPanel"></main>
+
+</div>
+
+<!-- DROP OVERLAY -->
+<div class="drop-overlay hidden" id="dropOverlay">
+  <div class="drop-msg">📷 Solte a foto aqui — a IA vai analisar</div>
+</div>
+
+<!-- CHAT FAB + WIDGET -->
+<button class="chat-fab" id="btnChat">💬 Especialista</button>
+<div class="chat-widget hidden" id="chatWidget">
+  <div class="cw-header">
+    <div class="cw-title">Especialista em Peças <span class="cw-badge">IA</span></div>
+    <button class="cw-close" id="btnCloseChat">✕</button>
+  </div>
+  <div class="cw-messages" id="cwMessages">
+    <div class="cw-system">
+      Sou especialista em peças automotivas. Pergunte sobre compatibilidade, preços, diferença entre original/paralela, ou mande a foto de um anúncio para eu analisar.
+    </div>
+  </div>
+  <div class="cw-footer">
+    <div class="cw-img-preview hidden" id="cwImgWrap">
+      <img id="cwImgPreview" alt="" />
+      <button id="btnRemoveCwImg">✕</button>
+    </div>
+    <div class="cw-input-row">
+      <label class="cw-attach" title="Enviar imagem">
+        📎<input type="file" id="cwFile" accept="image/*" hidden />
+      </label>
+      <textarea id="cwText" placeholder="Pergunte sobre peças…" rows="2"></textarea>
+      <button class="btn-send" id="btnSend">➤</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ MODAL: NOVO/EDITAR EVENTO ═══ -->
+<dialog id="dlgEvento">
+  <div class="modal-header">
+    <h2 id="dlgEventoTitle">Novo Evento</h2>
+    <button class="btn-close" data-close="dlgEvento">✕</button>
+  </div>
+  <form id="formEvento">
+    <div class="form-grid">
+      <label>Placa<input name="placa" required placeholder="QXX0A00" /></label>
+      <label>Veículo<input name="veiculo" required placeholder="Onix Joy 2023" /></label>
+      <label>Nome do associado<input name="associado" required placeholder="Nome completo" /></label>
+      <label>Telefone<input name="telefone" placeholder="(81) 99999-0000" /></label>
+      <label>Tipo de associado
+        <select name="tipo">
+          <option value="uber">Uber — cota 7%</option>
+          <option value="antigo">Associado antigo — cota 6%</option>
+          <option value="novo">Associado novo — cota 5%</option>
+        </select>
+      </label>
+      <label>Valor FIPE (R$)<input name="fipe" inputmode="decimal" placeholder="50000" /></label>
+      <label>Data da ocorrência<input name="data" type="date" /></label>
+      <label class="full">Descrição
+        <textarea name="descricao" rows="2" placeholder="Resumo da ocorrência (opcional)"></textarea>
+      </label>
+      <label class="full check-label">
+        <input type="checkbox" name="hasTerceiro" />
+        Houve terceiro envolvido
+      </label>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn-ghost" data-close="dlgEvento">Cancelar</button>
+      <button type="submit" class="btn-primary">Salvar</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- ═══ MODAL: ADICIONAR PEÇA ═══ -->
+<dialog id="dlgAddPeca">
+  <div class="modal-header">
+    <h2>Adicionar Peça</h2>
+    <button class="btn-close" data-close="dlgAddPeca">✕</button>
+  </div>
+  <form id="formAddPeca">
+    <div class="form-grid">
+      <label class="full">Nome da peça
+        <input name="nome" required placeholder="Ex.: Para-choque dianteiro" />
+      </label>
+      <label>Qtd<input name="qtd" inputmode="numeric" value="1" min="1" /></label>
+      <label>Tipo
+        <select name="tipo">
+          <option>Original</option>
+          <option>Paralela</option>
+          <option>Usada</option>
+          <option>Recondicionada</option>
+        </select>
+      </label>
+      <label class="full">Obs. da oficina
+        <input name="obs" placeholder="Detalhe, lado, referência… (opcional)" />
+      </label>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn-ghost" data-close="dlgAddPeca">Cancelar</button>
+      <button type="submit" class="btn-primary">Adicionar</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- ═══ MODAL: REGISTRAR COTAÇÃO ═══ -->
+<dialog id="dlgAddCotacao">
+  <div class="modal-header">
+    <h2>Registrar Cotação</h2>
+    <button class="btn-close" data-close="dlgAddCotacao">✕</button>
+  </div>
+  <div class="cotacao-peca-label" id="cotacaoPecaLabel"></div>
+  <form id="formAddCotacao">
+    <div class="form-grid">
+      <label class="full">Fornecedor
+        <select name="fornecedorId" id="selFornecedorCotacao" required></select>
+      </label>
+      <label class="full check-label">
+        <input type="checkbox" name="temPeca" id="chkTemPeca" checked />
+        Fornecedor tem a peça disponível
+      </label>
+      <div id="camposCotacao" style="display:contents">
+        <label>Valor unit. (R$)<input name="valor" inputmode="decimal" placeholder="0,00" /></label>
+        <label>Frete (R$)<input name="frete" inputmode="decimal" placeholder="0,00" /></label>
+        <label>Prazo (dias)<input name="prazo" inputmode="numeric" placeholder="3" /></label>
+        <label>Garantia<input name="garantia" placeholder="90 dias" /></label>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn-ghost" data-close="dlgAddCotacao">Cancelar</button>
+      <button type="submit" class="btn-primary">Salvar cotação</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- ═══ MODAL: FORNECEDORES ═══ -->
+<dialog id="dlgFornecedores">
+  <div class="modal-header">
+    <h2>Fornecedores</h2>
+    <button class="btn-close" data-close="dlgFornecedores">✕</button>
+  </div>
+  <div id="fornecedoresList" class="forn-list"></div>
+  <form id="formFornecedor" class="forn-add-form">
+    <h4>Novo fornecedor</h4>
+    <div class="form-grid">
+      <label class="full">Nome<input name="nome" required placeholder="Auto Peças João" /></label>
+      <label>WhatsApp<input name="whatsapp" placeholder="(81) 99999-0000" /></label>
+      <label>Cidade<input name="cidade" placeholder="Recife" /></label>
+    </div>
+    <button type="submit" class="btn-primary">+ Adicionar fornecedor</button>
+  </form>
+</dialog>
+
+<!-- ═══ MODAL: CONFIG IA ═══ -->
+<dialog id="dlgConfigIA">
+  <div class="modal-header">
+    <h2>Configurar IA (Ollama)</h2>
+    <button class="btn-close" data-close="dlgConfigIA">✕</button>
+  </div>
+  <div class="config-ia-body">
+    <p>O <strong>Ollama</strong> precisa estar instalado e rodando na máquina que serve o sistema.</p>
+    <p class="muted-text">Para instalar: <strong>ollama.com</strong> → depois rode <code>ollama pull llava</code> no terminal.</p>
+    <div class="form-grid" style="margin-top:16px">
+      <label class="full">Modelo para fotos (visão)
+        <input id="modeloVisao" placeholder="llava" />
+      </label>
+      <label class="full">Modelo para chat
+        <input id="modeloChat" placeholder="llama3.2" />
+      </label>
+    </div>
+    <div id="iaStatus" class="ia-status"></div>
+    <button class="btn-ghost" id="btnTestarIA" style="margin-top:12px">Testar conexão</button>
+  </div>
+  <div class="modal-footer">
+    <button class="btn-ghost" data-close="dlgConfigIA">Cancelar</button>
+    <button class="btn-primary" id="btnSalvarIA">Salvar</button>
+  </div>
+</dialog>
+
+<!-- ═══ MODAL: CONFIRMAÇÃO DE FOTO ═══ -->
+<dialog id="dlgFotoConfirm">
+  <div class="modal-header">
+    <h2 id="fotoConfirmTitle">Analisando foto…</h2>
+    <button class="btn-close" data-close="dlgFotoConfirm">✕</button>
+  </div>
+  <div class="foto-confirm-body" id="fotoConfirmBody">
+    <div class="loading-state">
+      <div class="spinner"></div>
+      <p>A IA está lendo a imagem…</p>
+    </div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn-ghost" data-close="dlgFotoConfirm">Cancelar</button>
+    <button class="btn-primary" id="btnConfirmarFoto" disabled>Confirmar e salvar</button>
+  </div>
+</dialog>
+
+<!-- ═══ MODAL: WHATSAPP ═══ -->
+<dialog id="dlgWhatsApp">
+  <div class="modal-header">
+    <h2>Mensagem para fornecedor</h2>
+    <button class="btn-close" data-close="dlgWhatsApp">✕</button>
+  </div>
+  <div class="wa-selecao" id="waSelecaoPecas"></div>
+  <div class="wa-preview" id="waPreview"></div>
+  <div class="modal-footer">
+    <button class="btn-ghost" data-close="dlgWhatsApp">Fechar</button>
+    <button class="btn-whatsapp" id="btnAbrirWA">Abrir no WhatsApp</button>
+  </div>
+</dialog>
+
+<script src="app.js"></script>
+</body>
+</html>
