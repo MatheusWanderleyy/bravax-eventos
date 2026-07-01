@@ -1116,12 +1116,6 @@ function setupListeners() {
     }
   });
 
-  document.getElementById('btnRestaurar')?.addEventListener('click', () => {
-    if (!confirm('Restaurar os dados de demonstração? Os dados atuais serão perdidos.')) return;
-    state = structuredClone(DEMO);
-    selectedId = state.eventos[0]?.id || null;
-    saveState(); renderAll();
-  });
 
   // Chat
   document.getElementById('btnChat')?.addEventListener('click', () =>
