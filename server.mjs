@@ -1,4 +1,4 @@
-import { createReadStream, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createReadStream, existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, unlinkSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,14 +10,30 @@ const root = fileURLToPath(new URL(".", import.meta.url));
 const port = Number(process.env.PORT || 4173);
 
 // ─── BANCO DE DADOS (arquivo JSON persistente) ─────────────────────
-const DATA_DIR  = process.env.DATA_DIR || join(root, "data");
-const DATA_FILE = join(DATA_DIR, "dados.json");
+const DATA_DIR   = process.env.DATA_DIR || join(root, "data");
+const DATA_FILE  = join(DATA_DIR, "dados.json");
+const FOTOS_DIR  = join(DATA_DIR, "fotos");
+const BACKUP_DIR = join(DATA_DIR, "backups");
 mkdirSync(DATA_DIR, { recursive: true });
+mkdirSync(FOTOS_DIR, { recursive: true });
+mkdirSync(BACKUP_DIR, { recursive: true });
 
 let db = { operadores: [], sessions: {}, state: { fornecedores: [], eventos: [] }, rev: 0 };
 try { db = { ...db, ...JSON.parse(readFileSync(DATA_FILE, "utf8")) }; } catch {}
 
-function persistDb() { writeFileSync(DATA_FILE, JSON.stringify(db)); }
+function persistDb() {
+  writeFileSync(DATA_FILE, JSON.stringify(db));
+  // Backup diário automático — mantém os últimos 14 dias
+  try {
+    const hoje = new Date().toISOString().split("T")[0];
+    const backupFile = join(BACKUP_DIR, `dados-${hoje}.json`);
+    if (!existsSync(backupFile)) {
+      writeFileSync(backupFile, JSON.stringify(db));
+      const antigos = readdirSync(BACKUP_DIR).filter(f => f.startsWith("dados-")).sort();
+      while (antigos.length > 14) unlinkSync(join(BACKUP_DIR, antigos.shift()));
+    }
+  } catch {}
+}
 function hashPin(pin, salt) { return crypto.createHash("sha256").update(salt + ":" + pin).digest("hex"); }
 
 function getSession(request) {
@@ -44,10 +60,15 @@ async function handleApi(request, response, url) {
     return send(200, { operadores: db.operadores.map(o => o.nome), setup: db.operadores.length === 0 });
   }
 
-  // Criar operador (primeiro é livre; depois exige login)
+  // Criar operador (primeiro é livre; depois exige login OU autorização de operador existente)
   if (url.pathname === "/api/operadores" && request.method === "POST") {
-    if (db.operadores.length > 0 && !getSession(request)) return send(401, { error: "Não autorizado" });
-    const { nome, pin } = JSON.parse(await readBody(request) || "{}");
+    const { nome, pin, autorizador } = JSON.parse(await readBody(request) || "{}");
+    if (db.operadores.length > 0 && !getSession(request)) {
+      const aut = autorizador && db.operadores.find(o => o.nome === autorizador.nome);
+      if (!aut || hashPin(autorizador.pin || "", aut.salt) !== aut.hash) {
+        return send(401, { error: "Autorização inválida — peça a um operador já cadastrado para digitar o PIN dele" });
+      }
+    }
     if (!nome?.trim() || !/^\d{4,6}$/.test(pin || "")) return send(400, { error: "Informe nome e PIN de 4 a 6 dígitos" });
     if (db.operadores.some(o => o.nome.toLowerCase() === nome.trim().toLowerCase())) return send(400, { error: "Já existe operador com esse nome" });
     const salt = crypto.randomBytes(8).toString("hex");
@@ -79,6 +100,36 @@ async function handleApi(request, response, url) {
     }
     persistDb();
     return send(200, { token, nome: op.nome });
+  }
+
+  // Upload de foto do acidente (autenticado) — 1 foto por requisição
+  if (url.pathname === "/api/fotos" && request.method === "POST") {
+    if (!getSession(request)) return send(401, { error: "Não autorizado" });
+    const { eventoId, base64 } = JSON.parse(await readBody(request) || "{}");
+    if (!eventoId || !base64) return send(400, { error: "Dados inválidos" });
+    const dir = join(FOTOS_DIR, String(eventoId).replace(/[^a-z0-9-]/gi, ""));
+    mkdirSync(dir, { recursive: true });
+    const id = crypto.randomBytes(8).toString("hex");
+    writeFileSync(join(dir, id + ".jpg"), Buffer.from(base64, "base64"));
+    return send(200, { id });
+  }
+
+  // Ver / excluir foto: /api/fotos/<eventoId>/<fotoId>
+  const fotoMatch = url.pathname.match(/^\/api\/fotos\/([a-z0-9-]+)\/([a-f0-9]+)$/i);
+  if (fotoMatch) {
+    const token = url.searchParams.get("t") || (request.headers.authorization || "").replace("Bearer ", "");
+    if (!db.sessions[token]) return send(401, { error: "Não autorizado" });
+    const file = join(FOTOS_DIR, fotoMatch[1], fotoMatch[2] + ".jpg");
+    if (!existsSync(file)) return send(404, { error: "Foto não encontrada" });
+    if (request.method === "GET") {
+      response.writeHead(200, { "Content-Type": "image/jpeg", "Cache-Control": "private, max-age=86400" });
+      createReadStream(file).pipe(response);
+      return;
+    }
+    if (request.method === "DELETE") {
+      unlinkSync(file);
+      return send(200, { ok: true });
+    }
   }
 
   // Dados do sistema (autenticado)

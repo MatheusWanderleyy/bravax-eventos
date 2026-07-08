@@ -285,6 +285,22 @@ function _renderDetail() {
         </div>
       </div>
 
+      <!-- FOTOS DO ACIDENTE -->
+      <div class="section-card">
+        <div class="section-toolbar">
+          <div class="section-toolbar-left">
+            <span class="section-title">Fotos do acidente</span>
+            <span class="pecas-count">${evt.fotos?.length || 0}</span>
+          </div>
+          <div class="section-toolbar-right">
+            <label class="btn-ghost-sm btn-upload-fotos">📷 Adicionar fotos
+              <input type="file" accept="image/*" multiple hidden onchange="uploadFotos(event,'${evt.id}')" />
+            </label>
+          </div>
+        </div>
+        ${renderFotos(evt)}
+      </div>
+
       <!-- COMPARATIVO DE PEÇAS -->
       <div class="section-card">
         <div class="section-toolbar">
@@ -399,7 +415,7 @@ function renderComparativo(evt) {
         const total = parseFloat(c.valor || 0) * (peca.qtd || 1) + parseFloat(c.frete || 0);
         totais[fId] = (totais[fId] || 0) + total;
         html += `<td class="cell-price ${isBest ? 'cell-best' : ''}">
-          <div class="price-val">${isBest ? '<span class="price-star">★</span>' : ''}${moeda(total)}</div>
+          <div class="price-val">${isBest ? '<span class="price-star">★</span>' : ''}${moeda(total)}${c.link ? `<a class="cot-link" href="${c.link}" target="_blank" title="Ver anúncio online">🔗</a>` : ''}</div>
           <div class="price-det">${moeda(c.valor)} × ${peca.qtd || 1}${parseFloat(c.frete) > 0 ? ` + ${moeda(c.frete)} fr.` : ''}</div>
           ${c.prazo ? `<div class="price-prazo">${c.prazo}d${c.garantia ? ' · ' + c.garantia : ''}</div>` : ''}
           <button class="btn-del-cot" onclick="deleteCotacao('${evt.id}','${peca.id}','${c.id}')" title="Remover cotação">✕</button>
@@ -671,6 +687,7 @@ function setupForms() {
       frete:    temPeca ? parseFloat(f.frete.value.replace(',', '.')) || 0 : 0,
       prazo:    temPeca ? parseInt(f.prazo.value) || null : null,
       garantia: temPeca ? f.garantia.value.trim() || '' : '',
+      link:     temPeca ? f.link.value.trim() || '' : '',
     });
     saveState();
     document.getElementById('dlgAddCotacao').close();
@@ -903,7 +920,14 @@ function setupDragDrop() {
 
 // ─── EXPORTAR ────────────────────────────────────────────────────
 
+let exportEventoId = null;
+
 function exportar(eventoId) {
+  exportEventoId = eventoId;
+  document.getElementById('dlgExport').showModal();
+}
+
+function gerarRelatorio(eventoId, incluirMelhor) {
   const evt = state.eventos.find(e => e.id === eventoId);
   if (!evt) return;
 
@@ -932,7 +956,7 @@ th{background:#f3f4f6;font-size:11px;text-transform:uppercase;letter-spacing:.04
 <table><thead><tr>
 <th>Peça</th><th>Qtd</th>
 ${forns.map(f => `<th>${f.nome}</th>`).join('')}
-<th>★ Melhor</th>
+${incluirMelhor ? '<th>★ Melhor</th>' : ''}
 </tr></thead><tbody>`;
 
   const totais = {};
@@ -955,19 +979,21 @@ ${forns.map(f => `<th>${f.nome}</th>`).join('')}
       else {
         const t = parseFloat(c.valor || 0) * (p.qtd || 1) + parseFloat(c.frete || 0);
         totais[f.id] += t;
-        html += `<td class="${f.id === bestId ? 'best' : ''}">R$ ${t.toLocaleString('pt-BR',{minimumFractionDigits:2})}${c.prazo ? ` (${c.prazo}d)` : ''}</td>`;
+        html += `<td class="${incluirMelhor && f.id === bestId ? 'best' : ''}">R$ ${t.toLocaleString('pt-BR',{minimumFractionDigits:2})}${c.prazo ? ` (${c.prazo}d)` : ''}</td>`;
       }
     });
-    if (bestId) {
-      const bf = forns.find(f => f.id === bestId);
-      html += `<td class="best">R$ ${best.toLocaleString('pt-BR',{minimumFractionDigits:2})} — ${bf?.nome}</td>`;
-    } else { html += '<td>—</td>'; }
+    if (incluirMelhor) {
+      if (bestId) {
+        const bf = forns.find(f => f.id === bestId);
+        html += `<td class="best">R$ ${best.toLocaleString('pt-BR',{minimumFractionDigits:2})} — ${bf?.nome}</td>`;
+      } else { html += '<td>—</td>'; }
+    }
     html += '</tr>';
   });
 
   html += `<tr class="tot"><td colspan="2">TOTAL</td>
 ${forns.map(f => `<td>${totais[f.id] > 0 ? 'R$ ' + totais[f.id].toLocaleString('pt-BR',{minimumFractionDigits:2}) : '—'}</td>`).join('')}
-<td></td></tr>`;
+${incluirMelhor ? '<td></td>' : ''}</tr>`;
 
   html += `</tbody></table><div style="margin-top:20px;font-size:11px;color:#999">Bravax Protege · ${hoje}</div></body></html>`;
 
@@ -1090,8 +1116,16 @@ function setupListeners() {
     renderFornecedores(); document.getElementById('dlgFornecedores').showModal();
   });
 
+  // Exportar
+  document.getElementById('btnGerarExport')?.addEventListener('click', () => {
+    const incluir = document.getElementById('chkExportMelhor').checked;
+    document.getElementById('dlgExport').close();
+    gerarRelatorio(exportEventoId, incluir);
+  });
+
   // Login
   document.getElementById('btnLogin')?.addEventListener('click', fazerLogin);
+  document.getElementById('btnModoNovo')?.addEventListener('click', toggleModoNovo);
   document.getElementById('loginPin')?.addEventListener('keydown', e => {
     if (e.key === 'Enter') fazerLogin();
   });
@@ -1224,8 +1258,75 @@ function enviarAtualizacaoWA(eventoId, atId) {
   const d = new Date(at.data);
   const quando = d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) + ' ' +
                  d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-  const msg = `🔔 *ATUALIZAÇÃO DE EVENTO*\n\n🚗 ${evt.veiculo} — ${evt.placa}\n👤 ${evt.associado}\n📋 ${evt.numero}\n\n📝 ${at.texto}\n\n— ${at.autor}, ${quando}`;
+  const msg = `🔔 *ATUALIZAÇÃO DE EVENTO*\n\n🚗 ${evt.veiculo} — ${evt.placa}\n👤 ${evt.associado}\n📋 ${evt.numero}\n\n📝 ${at.texto}\n\n— ${at.autor}, ${quando}\n\n🔗 Ver no sistema: ${location.origin}`;
   window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, '_blank');
+}
+
+// ─── FOTOS DO ACIDENTE ───────────────────────────────────────────
+
+function renderFotos(evt) {
+  if (!evt.fotos?.length) return '<div class="tl-empty">Nenhuma foto anexada. As fotos são comprimidas automaticamente e ficam guardadas no servidor.</div>';
+  const t = localStorage.getItem(TOKEN_KEY);
+  return '<div class="fotos-grid">' + evt.fotos.map(f => `
+    <div class="foto-thumb">
+      <a href="/api/fotos/${evt.id}/${f.id}?t=${t}" target="_blank" title="Abrir em tamanho real">
+        <img src="/api/fotos/${evt.id}/${f.id}?t=${t}" loading="lazy" alt="Foto do acidente" />
+      </a>
+      <button onclick="delFoto('${evt.id}','${f.id}')" title="Excluir foto">✕</button>
+      <span class="foto-autor">${f.autor || ''}</span>
+    </div>`).join('') + '</div>';
+}
+
+// Redimensiona para no máx. 1600px e converte para JPEG (~200-400KB)
+function comprimirImagem(file, maxDim = 1600, qualidade = 0.8) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+      const canvas = document.createElement('canvas');
+      canvas.width  = Math.round(img.width * scale);
+      canvas.height = Math.round(img.height * scale);
+      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(img.src);
+      resolve(canvas.toDataURL('image/jpeg', qualidade).split(',')[1]);
+    };
+    img.onerror = () => reject(new Error('Não foi possível ler a imagem'));
+    img.src = URL.createObjectURL(file);
+  });
+}
+
+async function uploadFotos(event, eventoId) {
+  const files = [...(event.target.files || [])];
+  event.target.value = '';
+  if (!files.length) return;
+  const evt = state.eventos.find(e => e.id === eventoId);
+  if (!evt) return;
+
+  const label = document.querySelector('.btn-upload-fotos');
+  if (label) label.firstChild.textContent = '⏳ Enviando… ';
+
+  try {
+    for (const file of files) {
+      const base64 = await comprimirImagem(file);
+      const r = await api('/api/fotos', { method: 'POST', body: JSON.stringify({ eventoId, base64 }) });
+      evt.fotos = evt.fotos || [];
+      evt.fotos.push({ id: r.id, autor: currentUser?.nome || '', data: new Date().toISOString() });
+    }
+    saveState();
+  } catch (err) {
+    alert('Erro ao enviar foto: ' + err.message);
+  }
+  renderDetail();
+}
+
+async function delFoto(eventoId, fotoId) {
+  if (!confirm('Excluir esta foto?')) return;
+  const evt = state.eventos.find(e => e.id === eventoId);
+  if (!evt) return;
+  evt.fotos = (evt.fotos || []).filter(f => f.id !== fotoId);
+  saveState();
+  renderDetail();
+  try { await api(`/api/fotos/${eventoId}/${fotoId}`, { method: 'DELETE' }); } catch {}
 }
 
 // ─── LOGIN ───────────────────────────────────────────────────────
@@ -1242,6 +1343,7 @@ async function mostrarLogin() {
       sel.classList.add('hidden');
       document.getElementById('loginNomeNovo').classList.remove('hidden');
       document.getElementById('btnLogin').textContent = 'Criar e entrar';
+      document.getElementById('btnModoNovo').classList.add('hidden');
     } else {
       loginSetupMode = false;
       sel.innerHTML = r.operadores.map(n => `<option>${n}</option>`).join('');
@@ -1253,17 +1355,42 @@ async function mostrarLogin() {
   }
 }
 
+let loginModoNovo = false;
+
+function toggleModoNovo() {
+  loginModoNovo = !loginModoNovo;
+  document.querySelector('.login-card').classList.toggle('modo-novo', loginModoNovo);
+  document.getElementById('loginNomeNovo').classList.toggle('hidden', !loginModoNovo);
+  document.getElementById('lblAutoriza').classList.toggle('hidden', !loginModoNovo);
+  document.getElementById('novoAutorizadorPin').classList.toggle('hidden', !loginModoNovo);
+  document.getElementById('loginTitulo').textContent = loginModoNovo
+    ? 'Criar novo acesso' : 'Selecione seu nome e digite o PIN';
+  document.getElementById('loginPin').placeholder = loginModoNovo
+    ? 'Crie seu PIN (4 a 6 dígitos)' : 'PIN (4 a 6 dígitos)';
+  document.getElementById('btnLogin').textContent = loginModoNovo ? 'Criar e entrar' : 'Entrar';
+  document.getElementById('btnModoNovo').textContent = loginModoNovo
+    ? '← Já tenho acesso' : '➕ Sou novo — criar meu acesso';
+  document.getElementById('loginErro').textContent = '';
+}
+
 async function fazerLogin() {
   const erro = document.getElementById('loginErro');
   erro.textContent = '';
   const pin  = document.getElementById('loginPin').value.trim();
-  const nome = loginSetupMode
+  const nome = (loginSetupMode || loginModoNovo)
     ? document.getElementById('loginNomeNovo').value.trim()
     : document.getElementById('loginNome').value;
   if (!nome || pin.length < 4) { erro.textContent = 'Informe nome e PIN de 4 a 6 dígitos'; return; }
   try {
     if (loginSetupMode) {
       await api('/api/operadores', { method: 'POST', body: JSON.stringify({ nome, pin }) });
+    } else if (loginModoNovo) {
+      const autorizador = {
+        nome: document.getElementById('loginNome').value,
+        pin:  document.getElementById('novoAutorizadorPin').value.trim(),
+      };
+      if (!autorizador.pin) { erro.textContent = 'Peça a um operador já cadastrado para digitar o PIN dele'; return; }
+      await api('/api/operadores', { method: 'POST', body: JSON.stringify({ nome, pin, autorizador }) });
     }
     const r = await api('/api/login', { method: 'POST', body: JSON.stringify({ nome, pin }) });
     localStorage.setItem(TOKEN_KEY, r.token);

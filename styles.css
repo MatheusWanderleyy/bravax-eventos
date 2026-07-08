@@ -910,6 +910,82 @@ dialog::backdrop { background: rgba(0,0,0,.35); backdrop-filter: blur(2px); }
 .login-card .btn-primary { padding: 12px; font-size: 15px; }
 .login-erro { color: var(--red); font-size: 13px; min-height: 18px; }
 
+.login-link {
+  background: none;
+  color: var(--red);
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: underline;
+  padding: 2px;
+}
+.login-link:hover { color: var(--red-dark); }
+
+.login-autoriza { font-size: 12px; color: var(--muted); text-align: left; padding: 2px 2px 0; }
+
+/* Reordena os campos no modo "criar acesso" */
+.login-card.modo-novo #loginNomeNovo    { order: 1; }
+.login-card.modo-novo #loginPin         { order: 2; }
+.login-card.modo-novo #lblAutoriza      { order: 3; }
+.login-card.modo-novo #loginNome        { order: 4; }
+.login-card.modo-novo #novoAutorizadorPin { order: 5; }
+.login-card.modo-novo #btnLogin         { order: 6; }
+.login-card.modo-novo #btnModoNovo      { order: 7; }
+.login-card.modo-novo .login-erro       { order: 8; }
+
+/* ══════════════════════════════════════════════
+   FOTOS DO ACIDENTE
+══════════════════════════════════════════════ */
+
+.fotos-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 10px;
+  padding: 14px 18px 18px;
+}
+
+.foto-thumb {
+  position: relative;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  aspect-ratio: 4 / 3;
+  background: var(--bg);
+}
+.foto-thumb img {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.foto-thumb button {
+  position: absolute; top: 4px; right: 4px;
+  background: rgba(0,0,0,.55);
+  color: white;
+  width: 20px; height: 20px;
+  border-radius: 50%;
+  font-size: 10px;
+  display: grid; place-items: center;
+  opacity: 0;
+  transition: opacity .15s;
+}
+.foto-thumb:hover button { opacity: 1; }
+.foto-autor {
+  position: absolute; bottom: 0; left: 0; right: 0;
+  background: linear-gradient(transparent, rgba(0,0,0,.6));
+  color: white;
+  font-size: 10px;
+  padding: 10px 6px 4px;
+  pointer-events: none;
+}
+
+.btn-upload-fotos { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+
+@media (max-width: 768px) {
+  .fotos-grid { grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); }
+  .foto-thumb button { opacity: 1; }
+}
+
+.cot-link { text-decoration: none; margin-left: 5px; font-size: 12px; }
+
 /* ══════════════════════════════════════════════
    ATUALIZAÇÕES (timeline)
 ══════════════════════════════════════════════ */

@@ -19,7 +19,10 @@
     <select id="loginNome"></select>
     <input id="loginNomeNovo" class="hidden" placeholder="Seu nome" autocomplete="off" />
     <input id="loginPin" type="password" inputmode="numeric" maxlength="6" placeholder="PIN (4 a 6 dígitos)" autocomplete="off" />
+    <div id="lblAutoriza" class="hidden login-autoriza">Selecione acima quem autoriza e digite o PIN dele:</div>
+    <input id="novoAutorizadorPin" class="hidden" type="password" inputmode="numeric" maxlength="6" placeholder="PIN de quem autoriza" autocomplete="off" />
     <button class="btn-primary" id="btnLogin">Entrar</button>
+    <button class="login-link" id="btnModoNovo">➕ Sou novo — criar meu acesso</button>
     <div class="login-erro" id="loginErro"></div>
   </div>
 </div>
@@ -180,6 +183,7 @@
         <label>Frete (R$)<input name="frete" inputmode="decimal" placeholder="0,00" /></label>
         <label>Prazo (dias)<input name="prazo" inputmode="numeric" placeholder="3" /></label>
         <label>Garantia<input name="garantia" placeholder="90 dias" /></label>
+        <label class="full">Link do anúncio (opcional)<input name="link" type="url" placeholder="https://…" /></label>
       </div>
     </div>
     <div class="modal-footer">
@@ -265,6 +269,25 @@
   <div class="modal-footer">
     <button class="btn-ghost" data-close="dlgFotoConfirm">Cancelar</button>
     <button class="btn-primary" id="btnConfirmarFoto" disabled>Confirmar e salvar</button>
+  </div>
+</dialog>
+
+<!-- ═══ MODAL: EXPORTAR ═══ -->
+<dialog id="dlgExport">
+  <div class="modal-header">
+    <h2>Exportar comparativo</h2>
+    <button class="btn-close" data-close="dlgExport">✕</button>
+  </div>
+  <div class="config-ia-body">
+    <label class="check-label">
+      <input type="checkbox" id="chkExportMelhor" checked />
+      Incluir coluna ★ menor preço (e destaque em verde)
+    </label>
+    <p class="muted-text" style="font-size:12px">Desmarque para gerar uma versão neutra — útil para enviar a fornecedores sem revelar os preços dos concorrentes.</p>
+  </div>
+  <div class="modal-footer">
+    <button class="btn-ghost" data-close="dlgExport">Cancelar</button>
+    <button class="btn-primary" id="btnGerarExport">Gerar relatório</button>
   </div>
 </dialog>
 
