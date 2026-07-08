@@ -8,6 +8,22 @@
 </head>
 <body>
 
+<!-- ─── TELA DE LOGIN ─── -->
+<div class="login-screen" id="loginScreen">
+  <div class="login-card">
+    <div class="login-logo">
+      <img src="assets/logo-bravax.png" alt="Bravax" onerror="this.style.display='none'" />
+    </div>
+    <h1>Bravax Protege</h1>
+    <p id="loginTitulo" class="login-sub">Selecione seu nome e digite o PIN</p>
+    <select id="loginNome"></select>
+    <input id="loginNomeNovo" class="hidden" placeholder="Seu nome" autocomplete="off" />
+    <input id="loginPin" type="password" inputmode="numeric" maxlength="6" placeholder="PIN (4 a 6 dígitos)" autocomplete="off" />
+    <button class="btn-primary" id="btnLogin">Entrar</button>
+    <div class="login-erro" id="loginErro"></div>
+  </div>
+</div>
+
 <div class="app">
 
   <!-- ─── PAINEL ESQUERDO ─── -->
@@ -30,7 +46,12 @@
 
     <div class="left-footer">
       <button class="footer-btn" id="btnFornecedores">👥 Fornecedores</button>
+      <button class="footer-btn" id="btnOperadores">🔑 Operadores</button>
       <button class="footer-btn" id="btnConfigIA"><span id="aiDot">○</span> Config. IA</button>
+      <div class="footer-user">
+        <span id="userTag"></span>
+        <button id="btnSair">Sair</button>
+      </div>
     </div>
   </aside>
 
@@ -183,6 +204,23 @@
       <label>Cidade<input name="cidade" placeholder="Recife" /></label>
     </div>
     <button type="submit" class="btn-primary">+ Adicionar fornecedor</button>
+  </form>
+</dialog>
+
+<!-- ═══ MODAL: OPERADORES ═══ -->
+<dialog id="dlgOperadores">
+  <div class="modal-header">
+    <h2>Operadores</h2>
+    <button class="btn-close" data-close="dlgOperadores">✕</button>
+  </div>
+  <div id="operadoresList" class="forn-list"></div>
+  <form id="formOperador" class="forn-add-form">
+    <h4>Novo operador</h4>
+    <div class="form-grid">
+      <label>Nome<input name="nome" required placeholder="Ex.: Maurício" autocomplete="off" /></label>
+      <label>PIN (4-6 dígitos)<input name="pin" required inputmode="numeric" maxlength="6" placeholder="1234" autocomplete="off" /></label>
+    </div>
+    <button type="submit" class="btn-primary">+ Adicionar operador</button>
   </form>
 </dialog>
 

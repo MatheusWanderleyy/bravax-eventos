@@ -9,72 +9,14 @@ const AI_CFG_KEY = 'bravax-ai-cfg';
 const CEP        = '51020-280';
 const COTAS      = { uber: 7, antigo: 6, novo: 5 };
 
-// ─── DADOS DEMO ─────────────────────────────────────────────────
-const DEMO = {
-  fornecedores: [
-    { id: 'f1', nome: 'Auto Peças Centro',   whatsapp: '5585988001100', cidade: 'Recife' },
-    { id: 'f2', nome: 'Norte Parts',          whatsapp: '5585977104200', cidade: 'Olinda' },
-    { id: 'f3', nome: 'Farois Express',       whatsapp: '5585996203001', cidade: 'Recife' },
-  ],
-  eventos: [
-    {
-      id: 'e1', numero: 'EV-2026-001', placa: 'QXX4A21',
-      veiculo: 'Chevrolet Onix 2022', associado: 'Carlos Henrique Lima',
-      telefone: '(85) 99988-2211', tipo: 'uber', fipe: 68000,
-      data: '2026-06-03', descricao: 'Colisão frontal com avarias em para-choque, farol e radiador.',
-      hasTerceiro: true, encerrado: false,
-      checklist: { comunicou0800: true, boRealizado: true, cotaPaga: false, termoAssociado: true, termoTerceiro: false },
-      pecas: [
-        {
-          id: 'p1', nome: 'Para-choque dianteiro', qtd: 1, tipo: 'Paralela', obs: '',
-          cotacoes: [
-            { id: 'c1', fornecedorId: 'f1', temPeca: true,  valor: 720, frete: 40, prazo: 2, garantia: '' },
-            { id: 'c2', fornecedorId: 'f2', temPeca: true,  valor: 610, frete: 90, prazo: 4, garantia: '' },
-            { id: 'c3', fornecedorId: 'f3', temPeca: false, valor: 0,   frete: 0,  prazo: 0, garantia: '' },
-          ],
-        },
-        {
-          id: 'p2', nome: 'Farol esquerdo', qtd: 1, tipo: 'Original', obs: 'Lado do motorista',
-          cotacoes: [
-            { id: 'c4', fornecedorId: 'f1', temPeca: false, valor: 0,   frete: 0,  prazo: 0, garantia: '' },
-            { id: 'c5', fornecedorId: 'f2', temPeca: true,  valor: 460, frete: 60, prazo: 3, garantia: '90 dias' },
-            { id: 'c6', fornecedorId: 'f3', temPeca: true,  valor: 520, frete: 20, prazo: 1, garantia: '60 dias' },
-          ],
-        },
-      ],
-    },
-    {
-      id: 'e2', numero: 'EV-2026-002', placa: 'NMQ8D90',
-      veiculo: 'Hyundai HB20 2020', associado: 'Mariana Rocha',
-      telefone: '(85) 98877-1109', tipo: 'antigo', fipe: 59000,
-      data: '2026-06-04', descricao: 'Avaria lateral direita.',
-      hasTerceiro: false, encerrado: false,
-      checklist: { comunicou0800: true, boRealizado: false, cotaPaga: false, termoAssociado: false, termoTerceiro: false },
-      pecas: [
-        {
-          id: 'p3', nome: 'Porta dianteira direita', qtd: 1, tipo: 'Usada', obs: '',
-          cotacoes: [
-            { id: 'c7', fornecedorId: 'f1', temPeca: true, valor: 980, frete: 120, prazo: 5, garantia: '' },
-          ],
-        },
-      ],
-    },
-    {
-      id: 'e3', numero: 'EV-2026-003', placa: 'QYD8059',
-      veiculo: 'Fiat Strada 2023', associado: 'Marcos Sobral',
-      telefone: '', tipo: 'uber', fipe: 85000,
-      data: '2026-06-05', descricao: 'Colisão. Aguardando abertura do processo.',
-      hasTerceiro: false, encerrado: false,
-      checklist: { comunicou0800: false, boRealizado: false, cotaPaga: false, termoAssociado: false, termoTerceiro: false },
-      pecas: [],
-    },
-  ],
-};
-
 // ─── ESTADO ─────────────────────────────────────────────────────
-let state       = loadState();
+let state       = { fornecedores: [], eventos: [] };
+let stateRev    = 0;
+let currentUser = null;
+let loginSetupMode = false;
+let savePending = false;
 let aiCfg       = loadAiCfg();
-let selectedId  = state.eventos[0]?.id ?? null;
+let selectedId  = null;
 let searchTerm  = '';
 let chatHistory = [];
 let chatPendingImg  = null; // { base64, url }
@@ -83,12 +25,40 @@ let editingEvtId    = null;
 let cotacaoCtx      = null; // { eventoId, pecaId, prefillFornId }
 let waCtx           = null; // { eventoId, fornId }
 
-// ─── PERSISTÊNCIA ───────────────────────────────────────────────
-function loadState() {
-  try { const s = localStorage.getItem(STORE_KEY); if (s) return JSON.parse(s); } catch {}
-  return structuredClone(DEMO);
+// ─── API / PERSISTÊNCIA NO SERVIDOR ─────────────────────────────
+const TOKEN_KEY = 'bravax-token';
+const USER_KEY  = 'bravax-user';
+
+async function api(path, opts = {}) {
+  const token = localStorage.getItem(TOKEN_KEY);
+  const resp = await fetch(path, {
+    ...opts,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(opts.headers || {}),
+    },
+  });
+  if (resp.status === 401 && currentUser) { doLogout(); throw new Error('Sessão expirada'); }
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(data.error || `Erro ${resp.status}`);
+  return data;
 }
-function saveState() { localStorage.setItem(STORE_KEY, JSON.stringify(state)); }
+
+let saveTimer = null;
+function saveState() {
+  savePending = true;
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(async () => {
+    try {
+      const r = await api('/api/state', { method: 'POST', body: JSON.stringify({ state }) });
+      stateRev = r.rev;
+      savePending = false;
+    } catch (err) {
+      console.error('Falha ao salvar:', err.message);
+    }
+  }, 400);
+}
 
 function loadAiCfg() {
   try { const s = localStorage.getItem(AI_CFG_KEY); if (s) return JSON.parse(s); } catch {}
@@ -251,6 +221,8 @@ function _renderDetail() {
   panel.innerHTML = `
     <div class="detail-wrap">
 
+      <button class="btn-back-mobile" onclick="voltarLista()">← Eventos</button>
+
       <!-- HEADER -->
       <div class="detail-header">
         <div>
@@ -294,6 +266,24 @@ function _renderDetail() {
 
       <!-- CHECKLIST -->
       <div class="checklist-bar">${renderChecklist(evt)}</div>
+
+      <!-- ATUALIZAÇÕES -->
+      <div class="section-card">
+        <div class="section-toolbar">
+          <div class="section-toolbar-left">
+            <span class="section-title">Atualizações</span>
+            <span class="pecas-count">${evt.atualizacoes?.length || 0}</span>
+          </div>
+        </div>
+        ${renderAtualizacoes(evt)}
+        <div class="timeline-input">
+          <textarea id="novaAtualizacao" rows="2" placeholder="Escreva a atualização… Ex.: Visitei a oficina hoje, a peça já chegou"></textarea>
+          <div class="timeline-btns">
+            <button class="btn-ghost-sm" onclick="addAtualizacao('${evt.id}', false)">Salvar</button>
+            <button class="btn-wa-save" onclick="addAtualizacao('${evt.id}', true)">💬 Salvar + WhatsApp</button>
+          </div>
+        </div>
+      </div>
 
       <!-- COMPARATIVO DE PEÇAS -->
       <div class="section-card">
@@ -464,7 +454,16 @@ function renderComparativo(evt) {
 
 // ─── AÇÕES ──────────────────────────────────────────────────────
 
-function selectEvento(id) { selectedId = id; renderAll(); }
+function selectEvento(id) {
+  selectedId = id;
+  document.body.classList.add('mobile-detail');
+  renderAll();
+}
+
+function voltarLista() {
+  document.body.classList.remove('mobile-detail');
+  renderList();
+}
 
 function toggleChecklist(eventoId, key) {
   const evt = state.eventos.find(e => e.id === eventoId);
@@ -1091,6 +1090,30 @@ function setupListeners() {
     renderFornecedores(); document.getElementById('dlgFornecedores').showModal();
   });
 
+  // Login
+  document.getElementById('btnLogin')?.addEventListener('click', fazerLogin);
+  document.getElementById('loginPin')?.addEventListener('keydown', e => {
+    if (e.key === 'Enter') fazerLogin();
+  });
+  document.getElementById('btnSair')?.addEventListener('click', doLogout);
+
+  // Operadores
+  document.getElementById('btnOperadores')?.addEventListener('click', () => {
+    renderOperadores(); document.getElementById('dlgOperadores').showModal();
+  });
+  document.getElementById('formOperador')?.addEventListener('submit', async e => {
+    e.preventDefault();
+    const f = e.target;
+    try {
+      await api('/api/operadores', {
+        method: 'POST',
+        body: JSON.stringify({ nome: f.nome.value.trim(), pin: f.pin.value.trim() }),
+      });
+      f.reset();
+      renderOperadores();
+    } catch (err) { alert(err.message); }
+  });
+
 
   document.getElementById('btnConfigIA')?.addEventListener('click', () => {
     document.getElementById('modeloVisao').value = aiCfg.modeloVisao || 'llava';
@@ -1149,14 +1172,215 @@ function setupListeners() {
   document.getElementById('btnAbrirWA')?.addEventListener('click', abrirWhatsApp);
 }
 
+// ─── ATUALIZAÇÕES (timeline) ─────────────────────────────────────
+
+function renderAtualizacoes(evt) {
+  const ats = [...(evt.atualizacoes || [])].reverse();
+  if (!ats.length) return '<div class="tl-empty">Nenhuma atualização ainda. Registre aqui visitas, contatos e andamentos.</div>';
+  return '<div class="timeline">' + ats.map(a => {
+    const d = new Date(a.data);
+    const quando = d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) + ' ' +
+                   d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    return `
+      <div class="tl-item">
+        <div class="tl-head">
+          <strong>${a.autor}</strong><span>${quando}</span>
+          <div class="tl-actions">
+            <button class="row-act-btn" onclick="enviarAtualizacaoWA('${evt.id}','${a.id}')" title="Enviar no WhatsApp">📤</button>
+            <button class="row-act-btn row-act-danger" onclick="delAtualizacao('${evt.id}','${a.id}')" title="Excluir">✕</button>
+          </div>
+        </div>
+        <div class="tl-text">${a.texto}</div>
+      </div>`;
+  }).join('') + '</div>';
+}
+
+function addAtualizacao(eventoId, enviarWA) {
+  const ta = document.getElementById('novaAtualizacao');
+  const texto = ta?.value.trim();
+  if (!texto) return;
+  const evt = state.eventos.find(e => e.id === eventoId);
+  if (!evt) return;
+  evt.atualizacoes = evt.atualizacoes || [];
+  const at = { id: uid(), autor: currentUser?.nome || '—', data: new Date().toISOString(), texto };
+  evt.atualizacoes.push(at);
+  saveState();
+  renderDetail();
+  if (enviarWA) enviarAtualizacaoWA(eventoId, at.id);
+}
+
+function delAtualizacao(eventoId, atId) {
+  const evt = state.eventos.find(e => e.id === eventoId);
+  if (!evt) return;
+  evt.atualizacoes = (evt.atualizacoes || []).filter(a => a.id !== atId);
+  saveState();
+  renderDetail();
+}
+
+function enviarAtualizacaoWA(eventoId, atId) {
+  const evt = state.eventos.find(e => e.id === eventoId);
+  const at  = evt?.atualizacoes?.find(a => a.id === atId);
+  if (!at) return;
+  const d = new Date(at.data);
+  const quando = d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) + ' ' +
+                 d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  const msg = `🔔 *ATUALIZAÇÃO DE EVENTO*\n\n🚗 ${evt.veiculo} — ${evt.placa}\n👤 ${evt.associado}\n📋 ${evt.numero}\n\n📝 ${at.texto}\n\n— ${at.autor}, ${quando}`;
+  window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, '_blank');
+}
+
+// ─── LOGIN ───────────────────────────────────────────────────────
+
+async function mostrarLogin() {
+  document.getElementById('loginScreen').classList.remove('hidden');
+  const erro = document.getElementById('loginErro');
+  try {
+    const r = await api('/api/operadores');
+    const sel = document.getElementById('loginNome');
+    if (r.setup) {
+      loginSetupMode = true;
+      document.getElementById('loginTitulo').textContent = 'Primeiro acesso — crie o primeiro operador';
+      sel.classList.add('hidden');
+      document.getElementById('loginNomeNovo').classList.remove('hidden');
+      document.getElementById('btnLogin').textContent = 'Criar e entrar';
+    } else {
+      loginSetupMode = false;
+      sel.innerHTML = r.operadores.map(n => `<option>${n}</option>`).join('');
+      const salvo = localStorage.getItem(USER_KEY);
+      if (salvo && r.operadores.includes(salvo)) sel.value = salvo;
+    }
+  } catch {
+    erro.textContent = 'Servidor indisponível. Recarregue a página.';
+  }
+}
+
+async function fazerLogin() {
+  const erro = document.getElementById('loginErro');
+  erro.textContent = '';
+  const pin  = document.getElementById('loginPin').value.trim();
+  const nome = loginSetupMode
+    ? document.getElementById('loginNomeNovo').value.trim()
+    : document.getElementById('loginNome').value;
+  if (!nome || pin.length < 4) { erro.textContent = 'Informe nome e PIN de 4 a 6 dígitos'; return; }
+  try {
+    if (loginSetupMode) {
+      await api('/api/operadores', { method: 'POST', body: JSON.stringify({ nome, pin }) });
+    }
+    const r = await api('/api/login', { method: 'POST', body: JSON.stringify({ nome, pin }) });
+    localStorage.setItem(TOKEN_KEY, r.token);
+    localStorage.setItem(USER_KEY, r.nome);
+    currentUser = { nome: r.nome };
+    document.getElementById('loginPin').value = '';
+    await carregarDados();
+    entrarNoApp();
+  } catch (err) {
+    erro.textContent = err.message;
+  }
+}
+
+function doLogout() {
+  localStorage.removeItem(TOKEN_KEY);
+  currentUser = null;
+  location.reload();
+}
+
+async function carregarDados() {
+  const r = await api('/api/state');
+  state = r.state && r.state.eventos ? r.state : { fornecedores: [], eventos: [] };
+  stateRev = r.rev || 0;
+  await migrarDadosLocais();
+}
+
+// Migra dados antigos do navegador para o servidor (uma única vez)
+async function migrarDadosLocais() {
+  try {
+    if (state.eventos.length) return;
+    const raw = localStorage.getItem(STORE_KEY);
+    if (!raw) return;
+    const local = JSON.parse(raw);
+    if (!local?.eventos?.length) return;
+    state = local;
+    const r = await api('/api/state', { method: 'POST', body: JSON.stringify({ state }) });
+    stateRev = r.rev;
+  } catch {}
+}
+
+function entrarNoApp() {
+  document.getElementById('loginScreen').classList.add('hidden');
+  document.getElementById('userTag').textContent = `👤 ${currentUser.nome}`;
+  selectedId = state.eventos[0]?.id ?? null;
+  renderAll();
+  iniciarPolling();
+}
+
+// Busca mudanças feitas por outros operadores a cada 20s
+let pollingAtivo = false;
+function iniciarPolling() {
+  if (pollingAtivo) return;
+  pollingAtivo = true;
+  setInterval(async () => {
+    if (savePending || document.querySelector('dialog[open]')) return;
+    try {
+      const r = await api('/api/state');
+      if (r.rev > stateRev) {
+        state = r.state;
+        stateRev = r.rev;
+        renderAll();
+      }
+    } catch {}
+  }, 20000);
+}
+
+// ─── OPERADORES ──────────────────────────────────────────────────
+
+async function renderOperadores() {
+  const list = document.getElementById('operadoresList');
+  list.innerHTML = '<p style="color:var(--muted);font-size:13px;padding:8px 0">Carregando…</p>';
+  try {
+    const r = await api('/api/operadores');
+    list.innerHTML = r.operadores.map(n => `
+      <div class="forn-item">
+        <div class="forn-info">
+          <strong>${n}</strong>
+          ${n === currentUser?.nome ? '<span>você</span>' : ''}
+        </div>
+        <button class="btn-icon danger" onclick="removerOperador('${n.replace(/'/g, "\\'")}')">✕</button>
+      </div>`).join('');
+  } catch (err) {
+    list.innerHTML = `<p style="color:var(--red);font-size:13px">${err.message}</p>`;
+  }
+}
+
+async function removerOperador(nome) {
+  if (!confirm(`Remover o operador ${nome}?`)) return;
+  try {
+    await api(`/api/operadores?nome=${encodeURIComponent(nome)}`, { method: 'DELETE' });
+    renderOperadores();
+  } catch (err) { alert(err.message); }
+}
+
 // ─── INIT ────────────────────────────────────────────────────────
 
-function init() {
+async function init() {
   setupDialogs();
   setupForms();
   setupListeners();
   setupDragDrop();
-  renderAll();
+  updateAiDot();
+
+  // Sessão salva? Entra direto. Senão, tela de login.
+  const token = localStorage.getItem(TOKEN_KEY);
+  const nome  = localStorage.getItem(USER_KEY);
+  if (token && nome) {
+    currentUser = { nome };
+    try {
+      await carregarDados();
+      entrarNoApp();
+      return;
+    } catch {
+      currentUser = null;
+    }
+  }
+  mostrarLogin();
 }
 
 document.addEventListener('DOMContentLoaded', init);

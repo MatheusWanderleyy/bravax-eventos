@@ -1,12 +1,103 @@
-import { createReadStream, existsSync } from "node:fs";
+import { createReadStream, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import http from "node:http";
+import crypto from "node:crypto";
 import os from "node:os";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
 const port = Number(process.env.PORT || 4173);
+
+// ─── BANCO DE DADOS (arquivo JSON persistente) ─────────────────────
+const DATA_DIR  = process.env.DATA_DIR || join(root, "data");
+const DATA_FILE = join(DATA_DIR, "dados.json");
+mkdirSync(DATA_DIR, { recursive: true });
+
+let db = { operadores: [], sessions: {}, state: { fornecedores: [], eventos: [] }, rev: 0 };
+try { db = { ...db, ...JSON.parse(readFileSync(DATA_FILE, "utf8")) }; } catch {}
+
+function persistDb() { writeFileSync(DATA_FILE, JSON.stringify(db)); }
+function hashPin(pin, salt) { return crypto.createHash("sha256").update(salt + ":" + pin).digest("hex"); }
+
+function getSession(request) {
+  const token = (request.headers.authorization || "").replace("Bearer ", "");
+  return db.sessions[token] ? { token, nome: db.sessions[token].nome } : null;
+}
+
+function readBody(request) {
+  return new Promise((resolve, reject) => {
+    let body = "";
+    request.on("data", chunk => { body += chunk; if (body.length > 10_000_000) request.destroy(); });
+    request.on("end", () => resolve(body));
+    request.on("error", reject);
+  });
+}
+
+const JSON_HEADERS = { "Content-Type": "application/json; charset=utf-8" };
+
+async function handleApi(request, response, url) {
+  const send = (status, obj) => { response.writeHead(status, JSON_HEADERS); response.end(JSON.stringify(obj)); };
+
+  // Lista de operadores (público — usado na tela de login)
+  if (url.pathname === "/api/operadores" && request.method === "GET") {
+    return send(200, { operadores: db.operadores.map(o => o.nome), setup: db.operadores.length === 0 });
+  }
+
+  // Criar operador (primeiro é livre; depois exige login)
+  if (url.pathname === "/api/operadores" && request.method === "POST") {
+    if (db.operadores.length > 0 && !getSession(request)) return send(401, { error: "Não autorizado" });
+    const { nome, pin } = JSON.parse(await readBody(request) || "{}");
+    if (!nome?.trim() || !/^\d{4,6}$/.test(pin || "")) return send(400, { error: "Informe nome e PIN de 4 a 6 dígitos" });
+    if (db.operadores.some(o => o.nome.toLowerCase() === nome.trim().toLowerCase())) return send(400, { error: "Já existe operador com esse nome" });
+    const salt = crypto.randomBytes(8).toString("hex");
+    db.operadores.push({ nome: nome.trim(), salt, hash: hashPin(pin, salt) });
+    persistDb();
+    return send(200, { ok: true });
+  }
+
+  // Remover operador
+  if (url.pathname === "/api/operadores" && request.method === "DELETE") {
+    if (!getSession(request)) return send(401, { error: "Não autorizado" });
+    const nome = url.searchParams.get("nome");
+    if (db.operadores.length <= 1) return send(400, { error: "Não é possível remover o único operador" });
+    db.operadores = db.operadores.filter(o => o.nome !== nome);
+    for (const [t, s] of Object.entries(db.sessions)) if (s.nome === nome) delete db.sessions[t];
+    persistDb();
+    return send(200, { ok: true });
+  }
+
+  // Login
+  if (url.pathname === "/api/login" && request.method === "POST") {
+    const { nome, pin } = JSON.parse(await readBody(request) || "{}");
+    const op = db.operadores.find(o => o.nome === nome);
+    if (!op || hashPin(pin || "", op.salt) !== op.hash) return send(401, { error: "Nome ou PIN incorretos" });
+    const token = crypto.randomBytes(24).toString("hex");
+    db.sessions[token] = { nome: op.nome, criado: Date.now() };
+    for (const [t, s] of Object.entries(db.sessions)) {
+      if (Date.now() - s.criado > 90 * 24 * 3600 * 1000) delete db.sessions[t];
+    }
+    persistDb();
+    return send(200, { token, nome: op.nome });
+  }
+
+  // Dados do sistema (autenticado)
+  if (url.pathname === "/api/state") {
+    const session = getSession(request);
+    if (!session) return send(401, { error: "Não autorizado" });
+    if (request.method === "GET") return send(200, { state: db.state, rev: db.rev });
+    if (request.method === "POST") {
+      const { state } = JSON.parse(await readBody(request) || "{}");
+      if (!state?.eventos || !state?.fornecedores) return send(400, { error: "Dados inválidos" });
+      db.state = state;
+      db.rev += 1;
+      persistDb();
+      return send(200, { rev: db.rev });
+    }
+  }
+
+  send(404, { error: "Rota não encontrada" });
+}
 
 const types = {
   ".html": "text/html; charset=utf-8",
@@ -103,8 +194,23 @@ const server = http.createServer(async (request, response) => {
     return;
   }
 
+  if (url.pathname.startsWith("/api/")) {
+    handleApi(request, response, url).catch(error => {
+      response.writeHead(500, JSON_HEADERS);
+      response.end(JSON.stringify({ error: error.message }));
+    });
+    return;
+  }
+
   const relative = url.pathname === "/" ? "index.html" : decodeURIComponent(url.pathname.slice(1));
   const filePath = normalize(join(root, relative));
+
+  // Nunca servir o banco de dados nem arquivos do git
+  if (filePath.startsWith(normalize(DATA_DIR)) || relative.includes(".git")) {
+    response.writeHead(403);
+    response.end("Acesso negado");
+    return;
+  }
 
   if (!filePath.startsWith(root) || !existsSync(filePath)) {
     response.writeHead(404);
