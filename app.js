@@ -81,10 +81,17 @@ function calcCota(evt) {
 function computeStatus(evt) {
   if (evt.encerrado) return { label: 'Encerrado', cls: 'green' };
   const ck = evt.checklist || {};
-  const done = [ck.comunicou0800, ck.boRealizado, ck.cotaPaga, ck.termoAssociado].filter(Boolean).length;
+  const itens = evt.ehTerceiro
+    ? [ck.comunicou0800, ck.boRealizado, ck.termoAssociado]
+    : [ck.comunicou0800, ck.boRealizado, ck.cotaPaga, ck.termoAssociado];
+  const done = itens.filter(Boolean).length;
   if (done === 0) return { label: 'Aberto', cls: 'red' };
-  if (done < 4)  return { label: 'Em andamento', cls: 'yellow' };
+  if (done < itens.length) return { label: 'Em andamento', cls: 'yellow' };
   return { label: 'Finalizando', cls: 'blue' };
+}
+
+function descreveVeiculo(evt) {
+  return [evt.veiculo, evt.ano, evt.cor].filter(Boolean).join(' · ');
 }
 
 function fileToBase64(file) {
@@ -190,8 +197,8 @@ function _renderList() {
           <span class="evt-placa">${evt.placa}</span>
           <span class="evt-dot">${st.label}</span>
         </div>
-        <div class="evt-nome">${evt.associado}</div>
-        <div class="evt-sub">${evt.veiculo || '—'} · ${evt.pecas?.length || 0}p · ${nCot}q</div>
+        <div class="evt-nome">${evt.ehTerceiro ? '🚙 ' : ''}${evt.associado}</div>
+        <div class="evt-sub">${evt.veiculo || '—'}${evt.ano ? ' ' + evt.ano : ''} · ${evt.pecas?.length || 0}p · ${nCot}q</div>
       </div>`;
   }).join('');
 }
@@ -229,8 +236,10 @@ function _renderDetail() {
           <div class="detail-placa">
             ${evt.placa}
             <span class="badge badge-${st.cls}">${st.label}</span>
+            ${evt.ehTerceiro ? '<span class="badge badge-gray">Terceiro</span>' : ''}
           </div>
-          <div class="detail-veiculo">${evt.veiculo || '—'}</div>
+          <a class="link-fipe" href="https://placafipe.com.br/placa/${(evt.placa || '').replace(/[^a-z0-9]/gi, '')}" target="_blank" title="Consulta modelo exato, ano e FIPE atualizada">🔎 Consultar placa no PlacaFipe</a>
+          <div class="detail-veiculo">${descreveVeiculo(evt) || '—'}</div>
           <div class="detail-info">
             <span>${evt.associado}</span>
             ${evt.telefone ? `<span>· ${evt.telefone}</span>` : ''}
@@ -250,8 +259,15 @@ function _renderDetail() {
         </div>
       </div>
 
-      <!-- COTA DE PARTICIPAÇÃO -->
-      ${cota !== null ? `
+      <!-- COTA DE PARTICIPAÇÃO / TERCEIRO -->
+      ${evt.ehTerceiro ? `
+        <div class="terceiro-card">
+          <div>
+            <div class="cota-label">Carro de terceiro — sem cota de participação</div>
+            <div class="terceiro-nome">Envolvido com o associado: ${evt.associadoEnvolvido || '—'}</div>
+          </div>
+        </div>
+      ` : cota !== null ? `
         <div class="cota-card">
           <div>
             <div class="cota-label">Cota de participação</div>
@@ -329,9 +345,9 @@ function renderChecklist(evt) {
   const items = [
     { key: 'comunicou0800',  label: '0800' },
     { key: 'boRealizado',    label: 'BO' },
-    { key: 'cotaPaga',       label: 'Cota paga' },
+    ...(evt.ehTerceiro ? [] : [{ key: 'cotaPaga', label: 'Cota paga' }]),
     { key: 'termoAssociado', label: 'Termo' },
-    ...(evt.hasTerceiro ? [{ key: 'termoTerceiro', label: 'Termo 3º' }] : []),
+    ...(evt.hasTerceiro || evt.ehTerceiro ? [{ key: 'termoTerceiro', label: 'Termo 3º' }] : []),
   ];
   return items.map(it => `
     <button class="ck-item ${ck[it.key] ? 'ck-done' : ''}"
@@ -524,11 +540,31 @@ function deleteFornecedor(id) {
 
 // ─── ABRIR MODAIS ────────────────────────────────────────────────
 
+// Ajusta o formulário conforme o tipo de evento (associado × terceiro)
+function atualizarFormTerceiro() {
+  const ehTerceiro = document.getElementById('chkEhTerceiro').checked;
+  document.getElementById('lblTipo').classList.toggle('hidden', ehTerceiro);
+  document.getElementById('lblFipe').classList.toggle('hidden', ehTerceiro);
+  document.getElementById('lblHasTerceiro').classList.toggle('hidden', ehTerceiro);
+  document.getElementById('lblAssociadoEnvolvido').classList.toggle('hidden', !ehTerceiro);
+  document.getElementById('lblAssociadoTxt').textContent = ehTerceiro
+    ? 'Nome do terceiro (dono do carro)' : 'Nome do associado';
+}
+
+// Sugestões de associados para o campo "envolvido com"
+function popularListaAssociados() {
+  const dl = document.getElementById('listaAssociados');
+  const nomes = [...new Set(state.eventos.filter(e => !e.ehTerceiro).map(e => e.associado).filter(Boolean))];
+  dl.innerHTML = nomes.map(n => `<option value="${n}">`).join('');
+}
+
 function openNovoEvento() {
   editingEvtId = null;
   const f = document.getElementById('formEvento');
   f.reset();
   f.data.value = new Date().toISOString().split('T')[0];
+  popularListaAssociados();
+  atualizarFormTerceiro();
   document.getElementById('dlgEventoTitle').textContent = 'Novo Evento';
   document.getElementById('dlgEvento').showModal();
 }
@@ -540,6 +576,8 @@ function openEditEvento(eventoId) {
   const f = document.getElementById('formEvento');
   f.placa.value       = evt.placa || '';
   f.veiculo.value     = evt.veiculo || '';
+  f.ano.value         = evt.ano || '';
+  f.cor.value         = evt.cor || '';
   f.associado.value   = evt.associado || '';
   f.telefone.value    = evt.telefone || '';
   f.tipo.value        = evt.tipo || 'novo';
@@ -547,6 +585,10 @@ function openEditEvento(eventoId) {
   f.data.value        = evt.data || '';
   f.descricao.value   = evt.descricao || '';
   f.hasTerceiro.checked = evt.hasTerceiro || false;
+  f.ehTerceiro.checked  = evt.ehTerceiro || false;
+  f.associadoEnvolvido.value = evt.associadoEnvolvido || '';
+  popularListaAssociados();
+  atualizarFormTerceiro();
   document.getElementById('dlgEventoTitle').textContent = 'Editar Evento';
   document.getElementById('dlgEvento').showModal();
 }
@@ -612,7 +654,7 @@ function openWA(eventoId, fornId) {
 function gerarMsgWA(evt, forn, pecaIds) {
   const pecas = evt.pecas.filter(p => pecaIds.includes(p.id));
   const lista = pecas.map(p => `• ${p.nome} (${p.qtd || 1}× ${p.tipo})`).join('\n');
-  const msg = `Olá ${forn.nome}! Tudo bem?\n\nPreciso de uma cotação para o veículo abaixo:\n\n🚗 ${evt.veiculo}\n🔑 Placa: ${evt.placa}\n\nPeças necessárias:\n${lista}\n\nFavor informar por peça:\n- Valor unitário\n- Frete para Recife/PE (CEP: ${CEP})\n- Prazo de entrega\n- Garantia\n\nObrigado!`;
+  const msg = `Olá ${forn.nome}! Tudo bem?\n\nPreciso de uma cotação para o veículo abaixo:\n\n🚗 ${descreveVeiculo(evt)}\n🔑 Placa: ${evt.placa}\n\nPeças necessárias:\n${lista}\n\nFavor informar por peça:\n- Valor unitário\n- Frete para Recife/PE (CEP: ${CEP})\n- Prazo de entrega\n- Garantia\n\nObrigado!`;
   document.getElementById('waPreview').textContent = msg;
 }
 
@@ -623,16 +665,21 @@ function setupForms() {
   document.getElementById('formEvento').addEventListener('submit', e => {
     e.preventDefault();
     const f = e.target;
+    const ehTerceiro = f.ehTerceiro.checked;
     const dados = {
       placa:       f.placa.value.trim().toUpperCase(),
       veiculo:     f.veiculo.value.trim(),
+      ano:         f.ano.value.trim(),
+      cor:         f.cor.value.trim(),
       associado:   f.associado.value.trim(),
       telefone:    f.telefone.value.trim(),
       tipo:        f.tipo.value,
-      fipe:        parseFloat(f.fipe.value.replace(',', '.')) || 0,
+      fipe:        ehTerceiro ? 0 : parseFloat(f.fipe.value.replace(',', '.')) || 0,
       data:        f.data.value,
       descricao:   f.descricao.value.trim(),
       hasTerceiro: f.hasTerceiro.checked,
+      ehTerceiro,
+      associadoEnvolvido: ehTerceiro ? f.associadoEnvolvido.value.trim() : '',
     };
     if (editingEvtId) {
       Object.assign(state.eventos.find(e => e.id === editingEvtId) || {}, dados);
@@ -697,6 +744,8 @@ function setupForms() {
   document.getElementById('chkTemPeca').addEventListener('change', e => {
     document.getElementById('camposCotacao').style.display = e.target.checked ? 'contents' : 'none';
   });
+
+  document.getElementById('chkEhTerceiro').addEventListener('change', atualizarFormTerceiro);
 
   // Fornecedor
   document.getElementById('formFornecedor').addEventListener('submit', e => {
@@ -952,7 +1001,7 @@ th{background:#f3f4f6;font-size:11px;text-transform:uppercase;letter-spacing:.04
 </style></head><body>
 <button onclick="window.print()" style="margin-bottom:16px;padding:8px 16px;cursor:pointer;border:1px solid #ddd;border-radius:6px">🖨️ Imprimir</button>
 <h1>Comparativo de Peças — ${evt.placa}</h1>
-<div class="sub">${evt.veiculo} · ${evt.associado} · Gerado em ${hoje}</div>
+<div class="sub">${descreveVeiculo(evt)} · ${evt.associado} · Gerado em ${hoje}</div>
 <table><thead><tr>
 <th>Peça</th><th>Qtd</th>
 ${forns.map(f => `<th>${f.nome}</th>`).join('')}
@@ -1008,7 +1057,7 @@ function buscarOnline(eventoId, pecaId) {
   const evt  = state.eventos.find(e => e.id === eventoId);
   const peca = evt?.pecas?.find(p => p.id === pecaId);
   if (!peca) return;
-  const q = encodeURIComponent(`${peca.nome} ${evt.veiculo}`);
+  const q = encodeURIComponent(`${peca.nome} ${evt.veiculo}${evt.ano ? ' ' + evt.ano : ''}`);
   // Abre os dois
   window.open(`https://www.google.com/search?q=${q}+Recife&tbm=shop`, '_blank');
 }
@@ -1258,7 +1307,7 @@ function enviarAtualizacaoWA(eventoId, atId) {
   const d = new Date(at.data);
   const quando = d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) + ' ' +
                  d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-  const msg = `🔔 *ATUALIZAÇÃO DE EVENTO*\n\n🚗 ${evt.veiculo} — ${evt.placa}\n👤 ${evt.associado}\n📋 ${evt.numero}\n\n📝 ${at.texto}\n\n— ${at.autor}, ${quando}\n\n🔗 Ver no sistema: ${location.origin}`;
+  const msg = `🔔 *ATUALIZAÇÃO DE EVENTO*\n\n🚗 ${descreveVeiculo(evt)} — ${evt.placa}\n👤 ${evt.associado}${evt.ehTerceiro ? ` (terceiro — assoc.: ${evt.associadoEnvolvido || '—'})` : ''}\n📋 ${evt.numero}\n\n📝 ${at.texto}\n\n— ${at.autor}, ${quando}\n\n🔗 Ver no sistema: ${location.origin}`;
   window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, '_blank');
 }
 

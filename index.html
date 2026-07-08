@@ -103,23 +103,33 @@
   </div>
   <form id="formEvento">
     <div class="form-grid">
+      <label class="full check-label toggle-terceiro">
+        <input type="checkbox" name="ehTerceiro" id="chkEhTerceiro" />
+        🚙 Este carro é de um terceiro (não associado)
+      </label>
       <label>Placa<input name="placa" required placeholder="QXX0A00" /></label>
-      <label>Veículo<input name="veiculo" required placeholder="Onix Joy 2023" /></label>
-      <label>Nome do associado<input name="associado" required placeholder="Nome completo" /></label>
+      <label>Veículo<input name="veiculo" required placeholder="Onix Joy" /></label>
+      <label>Ano<input name="ano" inputmode="numeric" maxlength="4" placeholder="2023" /></label>
+      <label>Cor (opcional)<input name="cor" placeholder="Prata" /></label>
+      <label id="lblAssociado"><span id="lblAssociadoTxt">Nome do associado</span><input name="associado" required placeholder="Nome completo" /></label>
       <label>Telefone<input name="telefone" placeholder="(81) 99999-0000" /></label>
-      <label>Tipo de associado
+      <label class="full hidden" id="lblAssociadoEnvolvido">Associado envolvido no acidente
+        <input name="associadoEnvolvido" list="listaAssociados" placeholder="Nome do associado com quem foi o acidente" />
+        <datalist id="listaAssociados"></datalist>
+      </label>
+      <label id="lblTipo">Tipo de associado
         <select name="tipo">
           <option value="uber">Uber — cota 7%</option>
           <option value="antigo">Associado antigo — cota 6%</option>
           <option value="novo">Associado novo — cota 5%</option>
         </select>
       </label>
-      <label>Valor FIPE (R$)<input name="fipe" inputmode="decimal" placeholder="50000" /></label>
+      <label id="lblFipe">Valor FIPE (R$)<input name="fipe" inputmode="decimal" placeholder="50000" /></label>
       <label>Data da ocorrência<input name="data" type="date" /></label>
       <label class="full">Descrição
         <textarea name="descricao" rows="2" placeholder="Resumo da ocorrência (opcional)"></textarea>
       </label>
-      <label class="full check-label">
+      <label class="full check-label" id="lblHasTerceiro">
         <input type="checkbox" name="hasTerceiro" />
         Houve terceiro envolvido
       </label>

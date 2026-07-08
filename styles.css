@@ -987,6 +987,46 @@ dialog::backdrop { background: rgba(0,0,0,.35); backdrop-filter: blur(2px); }
 .cot-link { text-decoration: none; margin-left: 5px; font-size: 12px; }
 
 /* ══════════════════════════════════════════════
+   EVENTO DE TERCEIRO
+══════════════════════════════════════════════ */
+
+.toggle-terceiro {
+  background: var(--bg);
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  padding: 9px 12px !important;
+  font-size: 12px !important;
+  color: var(--muted) !important;
+}
+.toggle-terceiro:has(input:checked) {
+  background: #eff6ff;
+  border-color: #93c5fd;
+  color: #1d4ed8 !important;
+}
+
+.badge-gray { background: #eff6ff; color: #1d4ed8; }
+.badge-gray::before { background: #3b82f6; }
+
+.terceiro-card {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: var(--radius);
+  padding: 12px 18px;
+  display: flex; align-items: center; gap: 14px;
+}
+.terceiro-card .cota-label { color: #1d4ed8; }
+.terceiro-card .terceiro-nome { font-size: 15px; font-weight: 700; }
+
+.link-fipe {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 12px; font-weight: 600;
+  color: var(--red);
+  text-decoration: none;
+  margin-top: 2px;
+}
+.link-fipe:hover { text-decoration: underline; }
+
+/* ══════════════════════════════════════════════
    ATUALIZAÇÕES (timeline)
 ══════════════════════════════════════════════ */
 
