@@ -51,8 +51,25 @@ function saveState() {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(async () => {
     try {
-      const r = await api('/api/state', { method: 'POST', body: JSON.stringify({ state }) });
-      stateRev = r.rev;
+      const token = localStorage.getItem(TOKEN_KEY);
+      const resp = await fetch('/api/state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ state, baseRev: stateRev }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (resp.status === 409) {
+        // Outro operador salvou primeiro — recarrega a versão mais nova
+        state = data.state;
+        stateRev = data.rev;
+        savePending = false;
+        renderAll();
+        alert('⚠️ Outro operador salvou alterações ao mesmo tempo. A tela foi atualizada com a versão mais recente — confira e refaça sua última alteração se necessário.');
+        return;
+      }
+      if (resp.status === 401) { doLogout(); return; }
+      if (!resp.ok) throw new Error(data.error || `Erro ${resp.status}`);
+      stateRev = data.rev;
       savePending = false;
     } catch (err) {
       console.error('Falha ao salvar:', err.message);
@@ -1466,7 +1483,7 @@ async function carregarDados() {
   await migrarDadosLocais();
 }
 
-// Migra dados antigos do navegador para o servidor (uma única vez)
+// Restaura backup local do navegador SÓ com confirmação do operador
 async function migrarDadosLocais() {
   try {
     if (state.eventos.length) return;
@@ -1474,9 +1491,29 @@ async function migrarDadosLocais() {
     if (!raw) return;
     const local = JSON.parse(raw);
     if (!local?.eventos?.length) return;
+    const ok = confirm(
+      `O servidor está sem eventos, mas este navegador tem um backup local com ${local.eventos.length} evento(s).\n\n` +
+      `ATENÇÃO: esse backup pode ser uma versão ANTIGA dos dados.\n\n` +
+      `Restaurar o backup para o servidor?`
+    );
+    if (!ok) return;
     state = local;
-    const r = await api('/api/state', { method: 'POST', body: JSON.stringify({ state }) });
+    const r = await api('/api/state', { method: 'POST', body: JSON.stringify({ state, baseRev: stateRev }) });
     stateRev = r.rev;
+  } catch {}
+}
+
+// Avisa se o Railway está sem volume (dados seriam perdidos a cada deploy)
+async function checarArmazenamento() {
+  try {
+    const h = await api('/api/health');
+    if (h.naNuvem && !h.armazenamentoPermanente && !document.getElementById('warnVolume')) {
+      const div = document.createElement('div');
+      div.id = 'warnVolume';
+      div.className = 'warn-banner';
+      div.innerHTML = '⚠️ <strong>URGENTE:</strong> armazenamento permanente não configurado — todos os dados serão PERDIDOS na próxima atualização do sistema. No Railway: botão direito no serviço → Attach Volume (mount path <code>/data</code>) e variável <code>DATA_DIR=/data</code>.';
+      document.body.prepend(div);
+    }
   } catch {}
 }
 
@@ -1486,6 +1523,7 @@ function entrarNoApp() {
   selectedId = state.eventos[0]?.id ?? null;
   renderAll();
   iniciarPolling();
+  checarArmazenamento();
 }
 
 // Busca mudanças feitas por outros operadores a cada 20s

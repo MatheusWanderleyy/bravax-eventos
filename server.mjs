@@ -55,6 +55,17 @@ const JSON_HEADERS = { "Content-Type": "application/json; charset=utf-8" };
 async function handleApi(request, response, url) {
   const send = (status, obj) => { response.writeHead(status, JSON_HEADERS); response.end(JSON.stringify(obj)); };
 
+  // Saúde do armazenamento (público)
+  if (url.pathname === "/api/health" && request.method === "GET") {
+    return send(200, {
+      ok: true,
+      armazenamentoPermanente: !!process.env.DATA_DIR,
+      naNuvem: !!process.env.RAILWAY_ENVIRONMENT,
+      eventos: db.state?.eventos?.length || 0,
+      rev: db.rev,
+    });
+  }
+
   // Lista de operadores (público — usado na tela de login)
   if (url.pathname === "/api/operadores" && request.method === "GET") {
     return send(200, { operadores: db.operadores.map(o => o.nome), setup: db.operadores.length === 0 });
@@ -138,8 +149,12 @@ async function handleApi(request, response, url) {
     if (!session) return send(401, { error: "Não autorizado" });
     if (request.method === "GET") return send(200, { state: db.state, rev: db.rev });
     if (request.method === "POST") {
-      const { state } = JSON.parse(await readBody(request) || "{}");
+      const { state, baseRev } = JSON.parse(await readBody(request) || "{}");
       if (!state?.eventos || !state?.fornecedores) return send(400, { error: "Dados inválidos" });
+      // Impede que uma tela desatualizada sobrescreva dados mais novos de outro operador
+      if (typeof baseRev === "number" && baseRev < db.rev) {
+        return send(409, { error: "Dados mais novos no servidor", rev: db.rev, state: db.state });
+      }
       db.state = state;
       db.rev += 1;
       persistDb();
