@@ -556,16 +556,20 @@ function deleteFornecedor(id) {
 
 // ─── ABRIR MODAIS ────────────────────────────────────────────────
 
-// Atualiza o link do PlacaFipe conforme a placa digitada no formulário
+// Mostra o link do PlacaFipe quando a placa está completa
 function atualizarLinkFipe() {
   const link  = document.getElementById('linkFipeForm');
+  const placa = document.getElementById('formEvento').placa.value.replace(/[^a-z0-9]/gi, '');
+  link.classList.toggle('hidden', placa.length < 7);
+}
+
+// Ao clicar: copia a placa para colar direto no campo do PlacaFipe
+function copiarPlacaFipe() {
+  const link  = document.getElementById('linkFipeForm');
   const placa = document.getElementById('formEvento').placa.value.replace(/[^a-z0-9]/gi, '').toUpperCase();
-  if (placa.length >= 7) {
-    link.href = `https://www.keplaca.com/placa/${placa}`;
-    link.classList.remove('hidden');
-  } else {
-    link.classList.add('hidden');
-  }
+  navigator.clipboard?.writeText(placa).catch(() => {});
+  link.textContent = `✓ Placa ${placa} copiada — cole lá com Ctrl+V`;
+  setTimeout(() => { link.textContent = '🔎 Consultar no PlacaFipe'; }, 5000);
 }
 
 // Ajusta o formulário conforme o tipo de evento (associado × terceiro)
