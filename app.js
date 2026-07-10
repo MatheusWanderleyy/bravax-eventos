@@ -561,7 +561,7 @@ function atualizarLinkFipe() {
   const link  = document.getElementById('linkFipeForm');
   const placa = document.getElementById('formEvento').placa.value.replace(/[^a-z0-9]/gi, '').toUpperCase();
   if (placa.length >= 7) {
-    link.href = `https://placafipe.com.br/placa/${placa}`;
+    link.href = `https://www.keplaca.com/placa/${placa}`;
     link.classList.remove('hidden');
   } else {
     link.classList.add('hidden');
