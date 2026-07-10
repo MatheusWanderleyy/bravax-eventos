@@ -255,7 +255,6 @@ function _renderDetail() {
             <span class="badge badge-${st.cls}">${st.label}</span>
             ${evt.ehTerceiro ? '<span class="badge badge-gray">Terceiro</span>' : ''}
           </div>
-          <a class="link-fipe" href="https://placafipe.com.br/placa/${(evt.placa || '').replace(/[^a-z0-9]/gi, '')}" target="_blank" title="Consulta modelo exato, ano e FIPE atualizada">🔎 Consultar placa no PlacaFipe</a>
           <div class="detail-veiculo">${descreveVeiculo(evt) || '—'}</div>
           <div class="detail-info">
             <span>${evt.associado}</span>
@@ -557,6 +556,18 @@ function deleteFornecedor(id) {
 
 // ─── ABRIR MODAIS ────────────────────────────────────────────────
 
+// Atualiza o link do PlacaFipe conforme a placa digitada no formulário
+function atualizarLinkFipe() {
+  const link  = document.getElementById('linkFipeForm');
+  const placa = document.getElementById('formEvento').placa.value.replace(/[^a-z0-9]/gi, '').toUpperCase();
+  if (placa.length >= 7) {
+    link.href = `https://placafipe.com.br/placa/${placa}`;
+    link.classList.remove('hidden');
+  } else {
+    link.classList.add('hidden');
+  }
+}
+
 // Ajusta o formulário conforme o tipo de evento (associado × terceiro)
 function atualizarFormTerceiro() {
   const ehTerceiro = document.getElementById('chkEhTerceiro').checked;
@@ -582,6 +593,7 @@ function openNovoEvento() {
   f.data.value = new Date().toISOString().split('T')[0];
   popularListaAssociados();
   atualizarFormTerceiro();
+  atualizarLinkFipe();
   document.getElementById('dlgEventoTitle').textContent = 'Novo Evento';
   document.getElementById('dlgEvento').showModal();
 }
@@ -606,6 +618,7 @@ function openEditEvento(eventoId) {
   f.associadoEnvolvido.value = evt.associadoEnvolvido || '';
   popularListaAssociados();
   atualizarFormTerceiro();
+  atualizarLinkFipe();
   document.getElementById('dlgEventoTitle').textContent = 'Editar Evento';
   document.getElementById('dlgEvento').showModal();
 }
@@ -763,6 +776,7 @@ function setupForms() {
   });
 
   document.getElementById('chkEhTerceiro').addEventListener('change', atualizarFormTerceiro);
+  document.getElementById('formEvento').placa.addEventListener('input', atualizarLinkFipe);
 
   // Fornecedor
   document.getElementById('formFornecedor').addEventListener('submit', e => {

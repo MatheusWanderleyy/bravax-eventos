@@ -107,7 +107,9 @@
         <input type="checkbox" name="ehTerceiro" id="chkEhTerceiro" />
         🚙 Este carro é de um terceiro (não associado)
       </label>
-      <label>Placa<input name="placa" required placeholder="QXX0A00" /></label>
+      <label>Placa<input name="placa" required placeholder="QXX0A00" autocomplete="off" />
+        <a id="linkFipeForm" class="link-fipe hidden" target="_blank" onclick="event.stopPropagation()">🔎 Consultar no PlacaFipe</a>
+      </label>
       <label>Veículo<input name="veiculo" required placeholder="Onix Joy" /></label>
       <label>Ano<input name="ano" inputmode="numeric" maxlength="4" placeholder="2023" /></label>
       <label>Cor (opcional)<input name="cor" placeholder="Prata" /></label>
