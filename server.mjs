@@ -113,27 +113,31 @@ async function handleApi(request, response, url) {
     return send(200, { token, nome: op.nome });
   }
 
-  // Upload de foto do acidente (autenticado) — 1 foto por requisição
+  // Upload de foto ou PDF (autenticado) — 1 arquivo por requisição
   if (url.pathname === "/api/fotos" && request.method === "POST") {
     if (!getSession(request)) return send(401, { error: "Não autorizado" });
-    const { eventoId, base64 } = JSON.parse(await readBody(request) || "{}");
+    const { eventoId, base64, tipo } = JSON.parse(await readBody(request) || "{}");
     if (!eventoId || !base64) return send(400, { error: "Dados inválidos" });
+    const ext = tipo === "pdf" ? ".pdf" : ".jpg";
     const dir = join(FOTOS_DIR, String(eventoId).replace(/[^a-z0-9-]/gi, ""));
     mkdirSync(dir, { recursive: true });
     const id = crypto.randomBytes(8).toString("hex");
-    writeFileSync(join(dir, id + ".jpg"), Buffer.from(base64, "base64"));
+    writeFileSync(join(dir, id + ext), Buffer.from(base64, "base64"));
     return send(200, { id });
   }
 
-  // Ver / excluir foto: /api/fotos/<eventoId>/<fotoId>
+  // Ver / excluir arquivo: /api/fotos/<eventoId>/<arquivoId>
+  // (procura .jpg primeiro — arquivos antigos — e depois .pdf)
   const fotoMatch = url.pathname.match(/^\/api\/fotos\/([a-z0-9-]+)\/([a-f0-9]+)$/i);
   if (fotoMatch) {
     const token = url.searchParams.get("t") || (request.headers.authorization || "").replace("Bearer ", "");
     if (!db.sessions[token]) return send(401, { error: "Não autorizado" });
-    const file = join(FOTOS_DIR, fotoMatch[1], fotoMatch[2] + ".jpg");
-    if (!existsSync(file)) return send(404, { error: "Foto não encontrada" });
+    const base = join(FOTOS_DIR, fotoMatch[1], fotoMatch[2]);
+    const file = existsSync(base + ".jpg") ? base + ".jpg" : base + ".pdf";
+    if (!existsSync(file)) return send(404, { error: "Arquivo não encontrado" });
     if (request.method === "GET") {
-      response.writeHead(200, { "Content-Type": "image/jpeg", "Cache-Control": "private, max-age=86400" });
+      const contentType = file.endsWith(".pdf") ? "application/pdf" : "image/jpeg";
+      response.writeHead(200, { "Content-Type": contentType, "Cache-Control": "private, max-age=86400" });
       createReadStream(file).pipe(response);
       return;
     }

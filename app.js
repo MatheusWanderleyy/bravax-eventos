@@ -322,12 +322,12 @@ function _renderDetail() {
       <div class="section-card">
         <div class="section-toolbar">
           <div class="section-toolbar-left">
-            <span class="section-title">Fotos do acidente</span>
+            <span class="section-title">Fotos e documentos</span>
             <span class="pecas-count">${evt.fotos?.length || 0}</span>
           </div>
           <div class="section-toolbar-right">
-            <label class="btn-ghost-sm btn-upload-fotos">📷 Adicionar fotos
-              <input type="file" accept="image/*" multiple hidden onchange="uploadFotos(event,'${evt.id}')" />
+            <label class="btn-ghost-sm btn-upload-fotos">📷 Fotos / 📄 PDF
+              <input type="file" accept="image/*,application/pdf" multiple hidden onchange="uploadFotos(event,'${evt.id}')" />
             </label>
           </div>
         </div>
@@ -1331,16 +1331,30 @@ function enviarAtualizacaoWA(eventoId, atId) {
 // ─── FOTOS DO ACIDENTE ───────────────────────────────────────────
 
 function renderFotos(evt) {
-  if (!evt.fotos?.length) return '<div class="tl-empty">Nenhuma foto anexada. As fotos são comprimidas automaticamente e ficam guardadas no servidor.</div>';
+  if (!evt.fotos?.length) return '<div class="tl-empty">Nenhum arquivo anexado. Aceita fotos e PDFs (orçamentos, BO, termos) — tudo fica guardado no servidor.</div>';
   const t = localStorage.getItem(TOKEN_KEY);
-  return '<div class="fotos-grid">' + evt.fotos.map(f => `
+  return '<div class="fotos-grid">' + evt.fotos.map(f => {
+    const href = `/api/fotos/${evt.id}/${f.id}?t=${t}`;
+    if (f.tipo === 'pdf') {
+      return `
+    <div class="foto-thumb doc-thumb">
+      <a href="${href}" target="_blank" title="Abrir PDF">
+        <div class="doc-icon">📄</div>
+        <div class="doc-nome">${f.nome || 'Documento.pdf'}</div>
+      </a>
+      <button onclick="delFoto('${evt.id}','${f.id}')" title="Excluir arquivo">✕</button>
+      <span class="foto-autor">${f.autor || ''}</span>
+    </div>`;
+    }
+    return `
     <div class="foto-thumb">
-      <a href="/api/fotos/${evt.id}/${f.id}?t=${t}" target="_blank" title="Abrir em tamanho real">
-        <img src="/api/fotos/${evt.id}/${f.id}?t=${t}" loading="lazy" alt="Foto do acidente" />
+      <a href="${href}" target="_blank" title="Abrir em tamanho real">
+        <img src="${href}" loading="lazy" alt="Foto do acidente" />
       </a>
       <button onclick="delFoto('${evt.id}','${f.id}')" title="Excluir foto">✕</button>
       <span class="foto-autor">${f.autor || ''}</span>
-    </div>`).join('') + '</div>';
+    </div>`;
+  }).join('') + '</div>';
 }
 
 // Redimensiona para no máx. 1600px e converte para JPEG (~200-400KB)
@@ -1373,14 +1387,28 @@ async function uploadFotos(event, eventoId) {
 
   try {
     for (const file of files) {
-      const base64 = await comprimirImagem(file);
-      const r = await api('/api/fotos', { method: 'POST', body: JSON.stringify({ eventoId, base64 }) });
+      const ehPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+      if (ehPdf && file.size > 7 * 1024 * 1024) {
+        alert(`"${file.name}" é muito grande (máximo 7MB por PDF).`);
+        continue;
+      }
+      const base64 = ehPdf ? await fileToBase64(file) : await comprimirImagem(file);
+      const r = await api('/api/fotos', {
+        method: 'POST',
+        body: JSON.stringify({ eventoId, base64, tipo: ehPdf ? 'pdf' : 'jpg' }),
+      });
       evt.fotos = evt.fotos || [];
-      evt.fotos.push({ id: r.id, autor: currentUser?.nome || '', data: new Date().toISOString() });
+      evt.fotos.push({
+        id: r.id,
+        autor: currentUser?.nome || '',
+        data: new Date().toISOString(),
+        tipo: ehPdf ? 'pdf' : 'jpg',
+        nome: ehPdf ? file.name : '',
+      });
     }
     saveState();
   } catch (err) {
-    alert('Erro ao enviar foto: ' + err.message);
+    alert('Erro ao enviar arquivo: ' + err.message);
   }
   renderDetail();
 }

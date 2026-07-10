@@ -979,6 +979,29 @@ dialog::backdrop { background: rgba(0,0,0,.35); backdrop-filter: blur(2px); }
 
 .btn-upload-fotos { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
 
+.doc-thumb a {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 100%;
+  text-decoration: none;
+  background: #fef2f2;
+  padding: 8px;
+}
+.doc-icon { font-size: 30px; }
+.doc-nome {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--ink);
+  text-align: center;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 @media (max-width: 768px) {
   .fotos-grid { grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); }
   .foto-thumb button { opacity: 1; }
