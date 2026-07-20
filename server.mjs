@@ -88,6 +88,24 @@ async function handleApi(request, response, url) {
     return send(200, { ok: true });
   }
 
+  // Alterar PIN de um operador (autenticado)
+  if (url.pathname === "/api/operadores" && request.method === "PUT") {
+    const sess = getSession(request);
+    if (!sess) return send(401, { error: "Não autorizado" });
+    const { nome, novoPin } = JSON.parse(await readBody(request) || "{}");
+    const op = db.operadores.find(o => o.nome === nome);
+    if (!op) return send(404, { error: "Operador não encontrado" });
+    if (!/^\d{4,6}$/.test(novoPin || "")) return send(400, { error: "PIN deve ter 4 a 6 dígitos" });
+    op.salt = crypto.randomBytes(8).toString("hex");
+    op.hash = hashPin(novoPin, op.salt);
+    // Derruba sessões antigas desse operador (menos a de quem está alterando agora)
+    for (const [t, s] of Object.entries(db.sessions)) {
+      if (s.nome === nome && t !== sess.token) delete db.sessions[t];
+    }
+    persistDb();
+    return send(200, { ok: true });
+  }
+
   // Remover operador
   if (url.pathname === "/api/operadores" && request.method === "DELETE") {
     if (!getSession(request)) return send(401, { error: "Não autorizado" });

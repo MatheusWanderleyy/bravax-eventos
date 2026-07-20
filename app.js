@@ -1597,17 +1597,50 @@ async function renderOperadores() {
   list.innerHTML = '<p style="color:var(--muted);font-size:13px;padding:8px 0">Carregando…</p>';
   try {
     const r = await api('/api/operadores');
-    list.innerHTML = r.operadores.map(n => `
+    list.innerHTML = r.operadores.map(n => {
+      const esc = n.replace(/'/g, "\\'");
+      return `
       <div class="forn-item">
         <div class="forn-info">
           <strong>${n}</strong>
           ${n === currentUser?.nome ? '<span>você</span>' : ''}
         </div>
-        <button class="btn-icon danger" onclick="removerOperador('${n.replace(/'/g, "\\'")}')">✕</button>
-      </div>`).join('');
+        <div class="op-actions">
+          <button class="btn-ghost-sm" onclick="alterarPinUI(this,'${esc}')">Alterar PIN</button>
+          <button class="btn-icon danger" onclick="removerOperador('${esc}')" title="Remover operador">✕</button>
+        </div>
+      </div>`;
+    }).join('');
   } catch (err) {
     list.innerHTML = `<p style="color:var(--red);font-size:13px">${err.message}</p>`;
   }
+}
+
+// Abre um mini-formulário embaixo do operador para definir o novo PIN
+function alterarPinUI(btn, nome) {
+  const item = btn.closest('.forn-item');
+  if (item.nextElementSibling?.classList.contains('pin-edit')) return;
+  const div = document.createElement('div');
+  div.className = 'pin-edit';
+  div.innerHTML = `
+    <input type="password" inputmode="numeric" maxlength="6" placeholder="Novo PIN de ${nome} (4-6 dígitos)" autocomplete="off" />
+    <button class="btn-primary">Salvar</button>
+    <button class="btn-ghost">Cancelar</button>`;
+  item.after(div);
+  const input = div.querySelector('input');
+  const [btnOk, btnCancelar] = div.querySelectorAll('button');
+  input.focus();
+  btnCancelar.onclick = () => div.remove();
+  btnOk.onclick = async () => {
+    const pin = input.value.trim();
+    if (!/^\d{4,6}$/.test(pin)) { alert('O PIN deve ter 4 a 6 dígitos (somente números).'); return; }
+    try {
+      await api('/api/operadores', { method: 'PUT', body: JSON.stringify({ nome, novoPin: pin }) });
+      div.remove();
+      alert(`✓ PIN de ${nome} alterado com sucesso.`);
+    } catch (err) { alert(err.message); }
+  };
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') btnOk.onclick(); });
 }
 
 async function removerOperador(nome) {

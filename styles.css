@@ -579,6 +579,28 @@ dialog::backdrop { background: rgba(0,0,0,.35); backdrop-filter: blur(2px); }
 .forn-info strong { font-size: 13px; }
 .forn-info span { font-size: 11px; color: var(--muted); }
 .forn-add-form { padding: 14px 22px 18px; border-top: 1px solid var(--border); }
+
+.op-actions { display: flex; align-items: center; gap: 6px; }
+
+.pin-edit {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--red-bg);
+  border: 1px solid #fecdd3;
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.pin-edit input {
+  flex: 1;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 7px 10px;
+  font-size: 13px;
+  min-width: 0;
+}
+.pin-edit input:focus { outline: 2px solid var(--red); outline-offset: -1px; }
+.pin-edit button { font-size: 12px; padding: 7px 12px; }
 .forn-add-form h4 { font-size: 13px; font-weight: 700; margin-bottom: 10px; color: var(--muted); }
 
 /* ── CONFIG IA MODAL ── */
