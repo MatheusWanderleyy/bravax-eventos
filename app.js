@@ -6,8 +6,15 @@
 // ─── CONSTANTES ─────────────────────────────────────────────────
 const STORE_KEY  = 'bravax-v3';
 const AI_CFG_KEY = 'bravax-ai-cfg';
+const TPL_KEY    = 'bravax-templates';
 const CEP        = '51020-280';
 const COTAS      = { uber: 7, antigo: 6, novo: 5 };
+const DIAS_PARADO = 5;
+
+const DEFAULT_TPL = {
+  cotacao: `Olá {{fornecedor}}! Tudo bem?\n\nPreciso de uma cotação para o veículo abaixo:\n\n🚗 {{veiculo}}\n🔑 Placa: {{placa}}\n\nPeças necessárias:\n{{pecas}}\n\nFavor informar por peça:\n- Valor unitário\n- Frete para Recife/PE (CEP: {{cep}})\n- Prazo de entrega\n- Garantia\n\nObrigado!`,
+  atualizacao: `🔔 *ATUALIZAÇÃO DE EVENTO*\n\n🚗 {{veiculo}} — {{placa}}\n👤 {{associado}}\n📋 {{numero}}\n\n📝 {{texto}}\n\n— {{autor}}, {{quando}}\n\n🔗 Ver no sistema: {{link}}`,
+};
 
 // ─── ESTADO ─────────────────────────────────────────────────────
 let state       = { fornecedores: [], eventos: [] };
@@ -16,8 +23,11 @@ let currentUser = null;
 let loginSetupMode = false;
 let savePending = false;
 let aiCfg       = loadAiCfg();
+let templates   = loadTemplates();
 let selectedId  = null;
 let searchTerm  = '';
+let filtroAtivo = 'todos';
+let lastSavedAt = null;
 let chatHistory = [];
 let chatPendingImg  = null; // { base64, url }
 let pendingConfirm  = null; // resultado da IA aguardando confirmação
@@ -48,6 +58,7 @@ async function api(path, opts = {}) {
 let saveTimer = null;
 function saveState() {
   savePending = true;
+  renderSaveStatus();
   clearTimeout(saveTimer);
   saveTimer = setTimeout(async () => {
     try {
@@ -63,6 +74,7 @@ function saveState() {
         state = data.state;
         stateRev = data.rev;
         savePending = false;
+        renderSaveStatus();
         renderAll();
         alert('⚠️ Outro operador salvou alterações ao mesmo tempo. A tela foi atualizada com a versão mais recente — confira e refaça sua última alteração se necessário.');
         return;
@@ -71,10 +83,23 @@ function saveState() {
       if (!resp.ok) throw new Error(data.error || `Erro ${resp.status}`);
       stateRev = data.rev;
       savePending = false;
+      lastSavedAt = new Date();
+      renderSaveStatus();
     } catch (err) {
+      savePending = false;
+      renderSaveStatus();
       console.error('Falha ao salvar:', err.message);
     }
   }, 400);
+}
+
+function renderSaveStatus() {
+  const el = document.getElementById('saveStatus');
+  if (!el) return;
+  if (savePending) { el.textContent = 'Salvando…'; return; }
+  el.textContent = lastSavedAt
+    ? `Salvo às ${lastSavedAt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`
+    : '';
 }
 
 function loadAiCfg() {
@@ -83,11 +108,74 @@ function loadAiCfg() {
 }
 function saveAiCfg() { localStorage.setItem(AI_CFG_KEY, JSON.stringify(aiCfg)); }
 
+function loadTemplates() {
+  try { const s = localStorage.getItem(TPL_KEY); if (s) return { ...DEFAULT_TPL, ...JSON.parse(s) }; } catch {}
+  return { ...DEFAULT_TPL };
+}
+function saveTemplates(t) { localStorage.setItem(TPL_KEY, JSON.stringify(t)); }
+function preencherTemplate(tpl, dados) {
+  return tpl.replace(/\{\{(\w+)\}\}/g, (_, k) => dados[k] ?? '');
+}
+
 // ─── UTILITÁRIOS ────────────────────────────────────────────────
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 5); }
 
 function moeda(v) {
   return 'R$ ' + parseFloat(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+}
+
+function parseMoeda(str) {
+  if (!str) return 0;
+  const limpo = String(str).replace(/\./g, '').replace(',', '.');
+  return parseFloat(limpo) || 0;
+}
+
+function formatMoeda(num) {
+  return parseFloat(num || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function attachCurrencyMask(el) {
+  if (!el) return;
+  el.addEventListener('input', () => {
+    let raw = el.value.replace(/[^\d,]/g, '');
+    const partes = raw.split(',');
+    let intPart = partes[0].replace(/^0+(?=\d)/, '');
+    const decPart = partes.length > 1 ? partes[1].slice(0, 2) : undefined;
+    intPart = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+    el.value = decPart !== undefined ? `${intPart},${decPart}` : intPart;
+  });
+}
+
+function diasSemAtualizacao(evt) {
+  if (evt.encerrado) return null;
+  const datas = (evt.atualizacoes || []).map(a => new Date(a.data).getTime()).filter(t => !isNaN(t));
+  let ultima;
+  if (datas.length) ultima = Math.max(...datas);
+  else if (evt.data) ultima = new Date(evt.data + 'T12:00:00').getTime();
+  else return null;
+  return Math.floor((Date.now() - ultima) / 86400000);
+}
+
+function historicoPeca(nomePeca) {
+  const alvo = (nomePeca || '').trim().toLowerCase();
+  if (!alvo) return null;
+  const achados = [];
+  state.eventos.forEach(evt => {
+    (evt.pecas || []).forEach(p => {
+      if (p.nome.trim().toLowerCase() !== alvo) return;
+      (p.cotacoes || []).forEach(c => {
+        if (!c.temPeca || !(parseFloat(c.valor) > 0)) return;
+        const forn = state.fornecedores.find(f => f.id === c.fornecedorId);
+        achados.push({
+          valor: parseFloat(c.valor), frete: parseFloat(c.frete || 0),
+          fornecedor: forn?.nome || '—', criadoEm: c.criadoEm || null, placa: evt.placa,
+        });
+      });
+    });
+  });
+  if (!achados.length) return null;
+  achados.sort((a, b) => (b.criadoEm || '').localeCompare(a.criadoEm || ''));
+  return achados[0];
 }
 
 function calcCota(evt) {
@@ -192,21 +280,31 @@ function _renderList() {
   if (!list) return;
 
   const term = searchTerm.toLowerCase();
-  const filtered = state.eventos.filter(e =>
+  let filtered = state.eventos.filter(e =>
     !term ||
     e.placa.toLowerCase().includes(term) ||
     e.associado.toLowerCase().includes(term) ||
     (e.veiculo || '').toLowerCase().includes(term)
   );
 
+  if (filtroAtivo === 'abertos') {
+    filtered = filtered.filter(e => !e.encerrado && computeStatus(e).cls === 'red');
+  } else if (filtroAtivo === 'parados') {
+    filtered = filtered.filter(e => { const d = diasSemAtualizacao(e); return d !== null && d >= DIAS_PARADO; });
+  } else if (filtroAtivo === 'terceiros') {
+    filtered = filtered.filter(e => e.ehTerceiro);
+  }
+
   if (!filtered.length) {
-    list.innerHTML = `<div class="list-empty">${term ? 'Nenhum resultado' : 'Nenhum evento'}</div>`;
+    list.innerHTML = `<div class="list-empty">${term || filtroAtivo !== 'todos' ? 'Nenhum resultado' : 'Nenhum evento'}</div>`;
     return;
   }
 
   list.innerHTML = filtered.map(evt => {
     const st = computeStatus(evt);
     const nCot = evt.pecas?.reduce((n, p) => n + (p.cotacoes?.length || 0), 0) || 0;
+    const dias = diasSemAtualizacao(evt);
+    const stale = dias !== null && dias >= DIAS_PARADO;
     return `
       <div class="evt-card dot-${st.cls} ${evt.id === selectedId ? 'selected' : ''}"
            onclick="selectEvento('${evt.id}')">
@@ -215,9 +313,15 @@ function _renderList() {
           <span class="evt-dot">${st.label}</span>
         </div>
         <div class="evt-nome">${evt.ehTerceiro ? '🚙 ' : ''}${evt.associado}</div>
-        <div class="evt-sub">${evt.veiculo || '—'}${evt.ano ? ' ' + evt.ano : ''} · ${evt.pecas?.length || 0}p · ${nCot}q</div>
+        <div class="evt-sub">${evt.veiculo || '—'}${evt.ano ? ' ' + evt.ano : ''} · ${evt.pecas?.length || 0}p · ${nCot}q${stale ? ` · <span class="stale-flag">⏰ ${dias}d parado</span>` : ''}</div>
       </div>`;
   }).join('');
+}
+
+function setFiltro(f) {
+  filtroAtivo = f;
+  document.querySelectorAll('#filterChips .chip').forEach(c => c.classList.toggle('active', c.dataset.f === f));
+  renderList();
 }
 
 // ── Detalhe do evento ────────────────────────────────────────────
@@ -241,6 +345,8 @@ function _renderDetail() {
 
   const st   = computeStatus(evt);
   const cota = calcCota(evt);
+  const diasParado = diasSemAtualizacao(evt);
+  const isStale = diasParado !== null && diasParado >= DIAS_PARADO;
 
   panel.innerHTML = `
     <div class="detail-wrap">
@@ -254,6 +360,7 @@ function _renderDetail() {
             ${evt.placa}
             <span class="badge badge-${st.cls}">${st.label}</span>
             ${evt.ehTerceiro ? '<span class="badge badge-gray">Terceiro</span>' : ''}
+            ${isStale ? `<span class="badge badge-stale">⏰ ${diasParado}d parado</span>` : ''}
           </div>
           <div class="detail-veiculo">${descreveVeiculo(evt) || '—'}</div>
           <div class="detail-info">
@@ -614,7 +721,7 @@ function openEditEvento(eventoId) {
   f.associado.value   = evt.associado || '';
   f.telefone.value    = evt.telefone || '';
   f.tipo.value        = evt.tipo || 'novo';
-  f.fipe.value        = evt.fipe || '';
+  f.fipe.value        = evt.fipe ? formatMoeda(evt.fipe) : '';
   f.data.value        = evt.data || '';
   f.descricao.value   = evt.descricao || '';
   f.hasTerceiro.checked = evt.hasTerceiro || false;
@@ -640,6 +747,16 @@ function openAddCotacao(eventoId, pecaId, prefillFornId) {
 
   document.getElementById('cotacaoPecaLabel').textContent =
     peca ? `Peça: ${peca.nome} × ${peca.qtd || 1}` : '';
+
+  const hint = document.getElementById('historicoHint');
+  const hist = peca ? historicoPeca(peca.nome) : null;
+  if (hist) {
+    const dataTxt = hist.criadoEm ? new Date(hist.criadoEm).toLocaleDateString('pt-BR') : '';
+    hint.textContent = `💡 Última cotação dessa peça: ${moeda(hist.valor)}${hist.frete ? ' + ' + moeda(hist.frete) + ' frete' : ''} — ${hist.fornecedor} (placa ${hist.placa}${dataTxt ? ', ' + dataTxt : ''})`;
+    hint.classList.remove('hidden');
+  } else {
+    hint.classList.add('hidden');
+  }
 
   const sel = document.getElementById('selFornecedorCotacao');
   sel.innerHTML = state.fornecedores.length
@@ -688,13 +805,19 @@ function openWA(eventoId, fornId) {
 function gerarMsgWA(evt, forn, pecaIds) {
   const pecas = evt.pecas.filter(p => pecaIds.includes(p.id));
   const lista = pecas.map(p => `• ${p.nome} (${p.qtd || 1}× ${p.tipo})`).join('\n');
-  const msg = `Olá ${forn.nome}! Tudo bem?\n\nPreciso de uma cotação para o veículo abaixo:\n\n🚗 ${descreveVeiculo(evt)}\n🔑 Placa: ${evt.placa}\n\nPeças necessárias:\n${lista}\n\nFavor informar por peça:\n- Valor unitário\n- Frete para Recife/PE (CEP: ${CEP})\n- Prazo de entrega\n- Garantia\n\nObrigado!`;
+  const msg = preencherTemplate(templates.cotacao, {
+    fornecedor: forn.nome, veiculo: descreveVeiculo(evt), placa: evt.placa, pecas: lista, cep: CEP,
+  });
   document.getElementById('waPreview').textContent = msg;
 }
 
 // ─── FORMULÁRIOS ────────────────────────────────────────────────
 
 function setupForms() {
+  attachCurrencyMask(document.getElementById('formEvento').fipe);
+  attachCurrencyMask(document.getElementById('formAddCotacao').valor);
+  attachCurrencyMask(document.getElementById('formAddCotacao').frete);
+
   // Evento
   document.getElementById('formEvento').addEventListener('submit', e => {
     e.preventDefault();
@@ -708,13 +831,17 @@ function setupForms() {
       associado:   f.associado.value.trim(),
       telefone:    f.telefone.value.trim(),
       tipo:        f.tipo.value,
-      fipe:        ehTerceiro ? 0 : parseFloat(f.fipe.value.replace(',', '.')) || 0,
+      fipe:        ehTerceiro ? 0 : parseMoeda(f.fipe.value),
       data:        f.data.value,
       descricao:   f.descricao.value.trim(),
       hasTerceiro: f.hasTerceiro.checked,
       ehTerceiro,
       associadoEnvolvido: ehTerceiro ? f.associadoEnvolvido.value.trim() : '',
     };
+    const dupEvt = state.eventos.find(e => e.placa === dados.placa && e.id !== editingEvtId && !e.encerrado);
+    if (dupEvt && !confirm(`Já existe um evento aberto com a placa ${dados.placa} (${dupEvt.associado}).\n\nDeseja continuar mesmo assim?`)) {
+      return;
+    }
     if (editingEvtId) {
       Object.assign(state.eventos.find(e => e.id === editingEvtId) || {}, dados);
     } else {
@@ -764,11 +891,12 @@ function setupForms() {
     peca.cotacoes = peca.cotacoes.filter(c => c.fornecedorId !== fornId);
     peca.cotacoes.push({
       id: uid(), fornecedorId: fornId, temPeca,
-      valor:    temPeca ? parseFloat(f.valor.value.replace(',', '.')) || 0 : 0,
-      frete:    temPeca ? parseFloat(f.frete.value.replace(',', '.')) || 0 : 0,
+      valor:    temPeca ? parseMoeda(f.valor.value) : 0,
+      frete:    temPeca ? parseMoeda(f.frete.value) : 0,
       prazo:    temPeca ? parseInt(f.prazo.value) || null : null,
       garantia: temPeca ? f.garantia.value.trim() || '' : '',
       link:     temPeca ? f.link.value.trim() || '' : '',
+      criadoEm: new Date().toISOString(),
     });
     saveState();
     document.getElementById('dlgAddCotacao').close();
@@ -971,7 +1099,7 @@ function confirmarFoto() {
       const frete  = parseFloat(document.querySelector(`.fc-frete[data-i="${i}"]`)?.value) || 0;
       const prazo  = parseInt(document.querySelector(`.fc-prazo[data-i="${i}"]`)?.value)  || null;
       peca.cotacoes = peca.cotacoes.filter(ct => ct.fornecedorId !== fornId);
-      peca.cotacoes.push({ id: uid(), fornecedorId: fornId, temPeca: valor > 0, valor, frete, prazo, garantia: c.garantia || '' });
+      peca.cotacoes.push({ id: uid(), fornecedorId: fornId, temPeca: valor > 0, valor, frete, prazo, garantia: c.garantia || '', criadoEm: new Date().toISOString() });
     });
   }
 
@@ -1084,6 +1212,78 @@ ${incluirMelhor ? '<td></td>' : ''}</tr>`;
   const win = window.open('', '_blank');
   win.document.write(html);
   win.document.close();
+}
+
+// ─── RELATÓRIO GERAL ────────────────────────────────────────────────
+
+function gerarRelatorioGeral() {
+  const ativos = state.eventos.filter(e => !e.encerrado);
+  const hoje = new Date().toLocaleDateString('pt-BR');
+  let totalCotaPendente = 0;
+  let parados = 0;
+
+  const linhas = ativos.map(evt => {
+    const st = computeStatus(evt);
+    const cota = evt.ehTerceiro ? null : calcCota(evt);
+    const cotaPagaOk = evt.checklist?.cotaPaga;
+    if (cota !== null && !cotaPagaOk) totalCotaPendente += cota;
+    const dias = diasSemAtualizacao(evt);
+    const parado = dias !== null && dias >= DIAS_PARADO;
+    if (parado) parados++;
+    return `<tr class="${parado ? 'linha-parada' : ''}">
+      <td>${evt.placa}</td>
+      <td>${evt.ehTerceiro ? '🚙 ' : ''}${evt.associado}</td>
+      <td>${descreveVeiculo(evt) || '—'}</td>
+      <td>${st.label}</td>
+      <td>${evt.ehTerceiro ? '—' : moeda(cota || 0)}</td>
+      <td>${evt.pecas?.length || 0}</td>
+      <td>${dias !== null ? dias + 'd' : '—'}</td>
+    </tr>`;
+  }).join('');
+
+  const html = `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
+<title>Relatório Geral — Bravax Protege</title>
+<style>
+body{font-family:Arial,sans-serif;padding:24px;font-size:13px;color:#111}
+h1{font-size:18px;margin-bottom:4px}
+.sub{color:#666;margin-bottom:20px;font-size:12px}
+.resumo{display:flex;gap:24px;margin-bottom:20px}
+.resumo div{background:#f3f4f6;border-radius:8px;padding:12px 18px}
+.resumo strong{display:block;font-size:20px}
+table{width:100%;border-collapse:collapse}
+th,td{border:1px solid #ddd;padding:8px 10px;text-align:left}
+th{background:#f3f4f6;font-size:11px;text-transform:uppercase}
+.linha-parada{background:#fff7ed}
+@media print{button{display:none}}
+</style></head><body>
+<button onclick="window.print()" style="margin-bottom:16px;padding:8px 16px;cursor:pointer;border:1px solid #ddd;border-radius:6px">🖨️ Imprimir</button>
+<h1>Relatório Geral — Eventos Abertos</h1>
+<div class="sub">Gerado em ${hoje}</div>
+<div class="resumo">
+  <div>Eventos abertos<strong>${ativos.length}</strong></div>
+  <div>Parados (${DIAS_PARADO}+ dias)<strong>${parados}</strong></div>
+  <div>Cota pendente<strong>${moeda(totalCotaPendente)}</strong></div>
+</div>
+<table><thead><tr><th>Placa</th><th>Associado</th><th>Veículo</th><th>Status</th><th>Cota</th><th>Peças</th><th>Últ. atividade</th></tr></thead>
+<tbody>${linhas || '<tr><td colspan="7">Nenhum evento aberto</td></tr>'}</tbody></table>
+<div style="margin-top:20px;font-size:11px;color:#999">Bravax Protege · ${hoje}</div>
+</body></html>`;
+
+  const win = window.open('', '_blank');
+  win.document.write(html);
+  win.document.close();
+}
+
+// ─── BACKUP MANUAL ───────────────────────────────────────────────────
+
+function baixarBackupAgora() {
+  const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const agora = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  a.href = url; a.download = `bravax-backup-${agora}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 // ─── BUSCAR ONLINE ────────────────────────────────────────────────
@@ -1205,6 +1405,30 @@ function setupListeners() {
     const incluir = document.getElementById('chkExportMelhor').checked;
     document.getElementById('dlgExport').close();
     gerarRelatorio(exportEventoId, incluir);
+  });
+
+  // Relatório geral e backup manual
+  document.getElementById('btnRelatorioGeral')?.addEventListener('click', gerarRelatorioGeral);
+  document.getElementById('btnBackupAgora')?.addEventListener('click', baixarBackupAgora);
+
+  // Templates de mensagem
+  document.getElementById('btnTemplates')?.addEventListener('click', () => {
+    const t = loadTemplates();
+    document.getElementById('tplCotacao').value = t.cotacao;
+    document.getElementById('tplAtualizacao').value = t.atualizacao;
+    document.getElementById('dlgTemplates').showModal();
+  });
+  document.getElementById('btnRestaurarTpl')?.addEventListener('click', () => {
+    document.getElementById('tplCotacao').value = DEFAULT_TPL.cotacao;
+    document.getElementById('tplAtualizacao').value = DEFAULT_TPL.atualizacao;
+  });
+  document.getElementById('btnSalvarTpl')?.addEventListener('click', () => {
+    templates = {
+      cotacao: document.getElementById('tplCotacao').value || DEFAULT_TPL.cotacao,
+      atualizacao: document.getElementById('tplAtualizacao').value || DEFAULT_TPL.atualizacao,
+    };
+    saveTemplates(templates);
+    document.getElementById('dlgTemplates').close();
   });
 
   // Login
@@ -1342,7 +1566,11 @@ function enviarAtualizacaoWA(eventoId, atId) {
   const d = new Date(at.data);
   const quando = d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) + ' ' +
                  d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-  const msg = `🔔 *ATUALIZAÇÃO DE EVENTO*\n\n🚗 ${descreveVeiculo(evt)} — ${evt.placa}\n👤 ${evt.associado}${evt.ehTerceiro ? ` (terceiro — assoc.: ${evt.associadoEnvolvido || '—'})` : ''}\n📋 ${evt.numero}\n\n📝 ${at.texto}\n\n— ${at.autor}, ${quando}\n\n🔗 Ver no sistema: ${location.origin}`;
+  const associadoTxt = evt.associado + (evt.ehTerceiro ? ` (terceiro — assoc.: ${evt.associadoEnvolvido || '—'})` : '');
+  const msg = preencherTemplate(templates.atualizacao, {
+    veiculo: descreveVeiculo(evt), placa: evt.placa, associado: associadoTxt,
+    numero: evt.numero, texto: at.texto, autor: at.autor, quando, link: location.origin,
+  });
   window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, '_blank');
 }
 
@@ -1568,6 +1796,7 @@ function entrarNoApp() {
   document.getElementById('userTag').textContent = `👤 ${currentUser.nome}`;
   selectedId = state.eventos[0]?.id ?? null;
   renderAll();
+  renderSaveStatus();
   iniciarPolling();
   checarArmazenamento();
 }

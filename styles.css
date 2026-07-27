@@ -83,6 +83,17 @@ button { cursor: pointer; border: none; }
 .search-wrap input::placeholder { color: rgba(255,255,255,.5); }
 .search-wrap input:focus { outline: none; background: rgba(255,255,255,.22); }
 
+.filter-chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 10px 10px; flex-shrink: 0; }
+.chip {
+  background: rgba(255,255,255,.10);
+  border: 1px solid rgba(255,255,255,.14);
+  color: rgba(255,255,255,.75);
+  font-size: 11px; font-weight: 600;
+  padding: 5px 10px; border-radius: 999px;
+}
+.chip:hover { background: rgba(255,255,255,.18); }
+.chip.active { background: white; color: var(--red); border-color: white; }
+
 .event-list {
   flex: 1;
   overflow-y: auto;
@@ -123,6 +134,7 @@ button { cursor: pointer; border: none; }
 
 .evt-nome { color: rgba(255,255,255,.88); font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .evt-sub  { color: rgba(255,255,255,.45); font-size: 11px; margin-top: 2px; }
+.stale-flag { color: #fbbf24; font-weight: 700; }
 
 .list-empty { color: rgba(255,255,255,.4); text-align: center; padding: 24px 12px; font-size: 13px; }
 
@@ -218,6 +230,8 @@ button { cursor: pointer; border: none; }
 .badge-blue::before { background: #3b82f6; }
 .badge-green  { background: #f0fdf4; color: #166534; }
 .badge-green::before { background: #22c55e; }
+.badge-stale  { background: #fffbeb; color: #92400e; }
+.badge-stale::before { background: #f59e0b; }
 
 /* ── COTA CARD ── */
 
@@ -567,6 +581,21 @@ dialog::backdrop { background: rgba(0,0,0,.35); backdrop-filter: blur(2px); }
 .check-label input { width: auto; }
 
 .cotacao-peca-label { padding: 10px 22px 0; font-size: 13px; font-weight: 600; color: var(--muted); }
+
+.historico-hint {
+  margin: 10px 22px 0;
+  padding: 9px 12px;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 8px;
+  font-size: 12px;
+  color: #92400e;
+}
+.historico-hint.hidden { display: none; }
+
+.tpl-label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: 4px; }
+.tpl-label textarea { border: 1px solid var(--border); border-radius: 8px; padding: 10px; font-size: 12px; font-family: monospace; resize: vertical; }
+.tpl-help { font-size: 11px; color: var(--muted); margin-bottom: 14px; }
 
 /* ── FORNECEDORES MODAL ── */
 
@@ -1134,11 +1163,12 @@ dialog::backdrop { background: rgba(0,0,0,.35); backdrop-filter: blur(2px); }
 ══════════════════════════════════════════════ */
 
 .footer-user {
-  display: flex; align-items: center; justify-content: space-between;
+  display: flex; flex-direction: column; gap: 3px;
   padding: 6px 8px 2px;
   color: rgba(255,255,255,.55);
   font-size: 11px;
 }
+.footer-user-row { display: flex; align-items: center; justify-content: space-between; }
 .footer-user button {
   background: none;
   color: rgba(255,255,255,.55);
@@ -1146,6 +1176,7 @@ dialog::backdrop { background: rgba(0,0,0,.35); backdrop-filter: blur(2px); }
   text-decoration: underline;
 }
 .footer-user button:hover { color: white; }
+.save-status { font-size: 10px; opacity: .65; }
 
 /* ══════════════════════════════════════════════
    MOBILE

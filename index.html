@@ -45,15 +45,28 @@
       <input id="searchInput" type="search" placeholder="Buscar placa ou nome…" autocomplete="off" />
     </div>
 
+    <div class="filter-chips" id="filterChips">
+      <button class="chip active" data-f="todos" onclick="setFiltro('todos')">Todos</button>
+      <button class="chip" data-f="abertos" onclick="setFiltro('abertos')">Abertos</button>
+      <button class="chip" data-f="parados" onclick="setFiltro('parados')">⏰ Parados</button>
+      <button class="chip" data-f="terceiros" onclick="setFiltro('terceiros')">🚙 Terceiros</button>
+    </div>
+
     <div id="eventList" class="event-list"></div>
 
     <div class="left-footer">
       <button class="footer-btn" id="btnFornecedores">👥 Fornecedores</button>
       <button class="footer-btn" id="btnOperadores">🔑 Operadores</button>
       <button class="footer-btn" id="btnConfigIA"><span id="aiDot">○</span> Config. IA</button>
+      <button class="footer-btn" id="btnRelatorioGeral">📊 Relatório geral</button>
+      <button class="footer-btn" id="btnBackupAgora">⬇️ Backup agora</button>
+      <button class="footer-btn" id="btnTemplates">✏️ Mensagens</button>
       <div class="footer-user">
-        <span id="userTag"></span>
-        <button id="btnSair">Sair</button>
+        <div class="footer-user-row">
+          <span id="userTag"></span>
+          <button id="btnSair">Sair</button>
+        </div>
+        <span id="saveStatus" class="save-status"></span>
       </div>
     </div>
   </aside>
@@ -181,6 +194,7 @@
     <button class="btn-close" data-close="dlgAddCotacao">✕</button>
   </div>
   <div class="cotacao-peca-label" id="cotacaoPecaLabel"></div>
+  <div class="historico-hint hidden" id="historicoHint"></div>
   <form id="formAddCotacao">
     <div class="form-grid">
       <label class="full">Fornecedor
@@ -300,6 +314,29 @@
   <div class="modal-footer">
     <button class="btn-ghost" data-close="dlgExport">Cancelar</button>
     <button class="btn-primary" id="btnGerarExport">Gerar relatório</button>
+  </div>
+</dialog>
+
+<!-- ═══ MODAL: TEMPLATES DE MENSAGEM ═══ -->
+<dialog id="dlgTemplates">
+  <div class="modal-header">
+    <h2>Mensagens do WhatsApp</h2>
+    <button class="btn-close" data-close="dlgTemplates">✕</button>
+  </div>
+  <div class="config-ia-body">
+    <label class="tpl-label">Mensagem de cotação para fornecedor
+      <textarea id="tplCotacao" rows="8"></textarea>
+    </label>
+    <p class="tpl-help">Variáveis disponíveis: {{fornecedor}} {{veiculo}} {{placa}} {{pecas}} {{cep}}</p>
+    <label class="tpl-label">Mensagem de atualização de evento
+      <textarea id="tplAtualizacao" rows="8"></textarea>
+    </label>
+    <p class="tpl-help">Variáveis disponíveis: {{veiculo}} {{placa}} {{associado}} {{numero}} {{texto}} {{autor}} {{quando}} {{link}}</p>
+  </div>
+  <div class="modal-footer">
+    <button class="btn-ghost" id="btnRestaurarTpl">Restaurar padrão</button>
+    <button class="btn-ghost" data-close="dlgTemplates">Cancelar</button>
+    <button class="btn-primary" id="btnSalvarTpl">Salvar</button>
   </div>
 </dialog>
 
