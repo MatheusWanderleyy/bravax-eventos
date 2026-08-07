@@ -77,12 +77,24 @@ async function hinovaBuscarEventoPorPlaca(placa, dias = 90) {
   const headers = token => ({ "Content-Type": "application/json", Authorization: `Bearer ${token}` });
 
   let token = await hinovaAutenticar();
-  let resp = await fetch(`${HINOVA_BASE_URL}/listar/evento`, { method: "POST", headers: headers(token), body });
-
-  if (resp.status === 401) {
-    hinovaToken = null; // token expirado por outro motivo — renova uma vez e tenta de novo
-    token = await hinovaAutenticar();
+  let resp;
+  // 406/5xx são instabilidades conhecidas do servidor da Hinova (mesmo padrão já visto no
+  // bravax-automacao) — vale UMA retentativa curta. Não retenta timeout (não melhora, só atrasa o atendente).
+  for (let tentativa = 0; tentativa < 2; tentativa++) {
     resp = await fetch(`${HINOVA_BASE_URL}/listar/evento`, { method: "POST", headers: headers(token), body });
+
+    if (resp.status === 401) {
+      hinovaToken = null; // token expirado por outro motivo — renova uma vez e tenta de novo
+      token = await hinovaAutenticar();
+      resp = await fetch(`${HINOVA_BASE_URL}/listar/evento`, { method: "POST", headers: headers(token), body });
+    }
+
+    if (resp.ok || tentativa === 1) break;
+    if ([406, 500, 502, 503, 504].includes(resp.status)) {
+      await new Promise(r => setTimeout(r, 3000));
+      continue;
+    }
+    break; // erro que não é transiente (400, 403, etc.) — não adianta retentar
   }
   if (!resp.ok) throw new Error(`Hinova respondeu HTTP ${resp.status}`);
 
