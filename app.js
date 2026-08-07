@@ -705,7 +705,7 @@ async function buscarNaHinova() {
   try {
     const data = await api(`/api/hinova/buscar-evento?placa=${encodeURIComponent(placa)}`);
     if (!data.encontrado) {
-      statusEl.textContent = 'Nenhum evento encontrado na Hinova para essa placa nos últimos 90 dias — preencha manualmente.';
+      statusEl.textContent = 'Nenhum evento encontrado na Hinova para essa placa nos últimos 30 dias — preencha manualmente.';
       statusEl.className = 'hinova-status warn';
       return;
     }

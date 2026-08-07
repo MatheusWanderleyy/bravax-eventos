@@ -34,7 +34,7 @@ Abra o arquivo `index.html` no navegador.
 
 ## Busca assistida na Hinova
 
-Ao abrir "Novo Evento", o botão **🔍 Buscar na Hinova** procura, pela placa, um evento cadastrado na Hinova nos últimos 90 dias e preenche o formulário automaticamente (veículo, associado, telefone, FIPE, data, tipo quando confirmado como Uber). O atendente sempre confere e edita antes de salvar — a busca nunca grava nada sozinha, só sugere.
+Ao abrir "Novo Evento", o botão **🔍 Buscar na Hinova** procura, pela placa, um evento cadastrado na Hinova nos últimos 30 dias (limite máximo aceito pela própria API para esse endpoint) e preenche o formulário automaticamente (veículo, associado, telefone, FIPE, data, tipo quando confirmado como Uber). O atendente sempre confere e edita antes de salvar — a busca nunca grava nada sozinha, só sugere.
 
 Para ativar em produção (Railway), configure as variáveis de ambiente:
 

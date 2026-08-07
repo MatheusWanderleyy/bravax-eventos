@@ -67,9 +67,11 @@ function normPlaca(p) { return String(p || "").toUpperCase().replace(/[^A-Z0-9]/
 function dataBR(d) { return `${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")}/${d.getFullYear()}`; }
 function tituloCase(s) { return String(s || "").toLowerCase().replace(/(^|\s)\S/g, c => c.toUpperCase()); }
 
-// Busca eventos num período (janela padrão: últimos 90 dias) e filtra por placa.
+// Busca eventos num período (janela padrão: últimos 30 dias) e filtra por placa.
 // listar/evento da Hinova só aceita filtro por período, não por placa/CPF — filtragem é feita aqui.
-async function hinovaBuscarEventoPorPlaca(placa, dias = 90) {
+// IMPORTANTE: a Hinova rejeita (HTTP 406) intervalos maiores que 30 dias entre as datas — confirmado
+// reproduzindo a chamada diretamente ("O limite do intervalo entre as datas é de 30 dias").
+async function hinovaBuscarEventoPorPlaca(placa, dias = 30) {
   const placaNorm = normPlaca(placa);
   const hoje = new Date();
   const inicio = new Date(hoje.getTime() - dias * 86400000);
@@ -78,8 +80,9 @@ async function hinovaBuscarEventoPorPlaca(placa, dias = 90) {
 
   let token = await hinovaAutenticar();
   let resp;
-  // 406/5xx são instabilidades conhecidas do servidor da Hinova (mesmo padrão já visto no
-  // bravax-automacao) — vale UMA retentativa curta. Não retenta timeout (não melhora, só atrasa o atendente).
+  // 5xx é instabilidade conhecida do servidor da Hinova (mesmo padrão já visto no bravax-automacao)
+  // — vale UMA retentativa curta. 406 aqui normalmente é erro de validação (não transiente), então
+  // não é retentado. Timeout também não é retentado (não melhora, só atrasa o atendente).
   for (let tentativa = 0; tentativa < 2; tentativa++) {
     resp = await fetch(`${HINOVA_BASE_URL}/listar/evento`, { method: "POST", headers: headers(token), body });
 
@@ -90,13 +93,22 @@ async function hinovaBuscarEventoPorPlaca(placa, dias = 90) {
     }
 
     if (resp.ok || tentativa === 1) break;
-    if ([406, 500, 502, 503, 504].includes(resp.status)) {
+    if ([500, 502, 503, 504].includes(resp.status)) {
       await new Promise(r => setTimeout(r, 3000));
       continue;
     }
-    break; // erro que não é transiente (400, 403, etc.) — não adianta retentar
+    break; // erro que não é transiente de servidor (400, 401, 406 de validação, 403…) — não adianta retentar
   }
-  if (!resp.ok) throw new Error(`Hinova respondeu HTTP ${resp.status}`);
+  if (!resp.ok) {
+    // Hinova costuma devolver a causa em "error"/"mensagem" no corpo — inclui isso no erro
+    // para o próximo problema aparecer explicado direto no log, sem precisar reproduzir na mão.
+    let detalhe = "";
+    try {
+      const corpo = await resp.clone().json();
+      detalhe = corpo?.error?.join?.(", ") || corpo?.mensagem || "";
+    } catch {}
+    throw new Error(`Hinova respondeu HTTP ${resp.status}${detalhe ? ": " + detalhe : ""}`);
+  }
 
   const data = await resp.json();
   const lista = Array.isArray(data) ? data : (data.eventos || data.resultado || []);
