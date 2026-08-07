@@ -36,7 +36,7 @@ function persistDb() {
 }
 function hashPin(pin, salt) { return crypto.createHash("sha256").update(salt + ":" + pin).digest("hex"); }
 
-// ─── HINOVA SGA — busca assistida de evento (SOMENTE LEITURA) ─────
+// ─── HINOVA SGA — autopreenchimento de veículo por placa (SOMENTE LEITURA) ─
 // Nunca escreve em db.state / DATA_FILE. Só sugere dados para o atendente
 // preencher no formulário — quem grava é sempre o fluxo humano de sempre (/api/state).
 const HINOVA_BASE_URL = process.env.HINOVA_BASE_URL || "https://api.hinova.com.br/api/sga/v2";
@@ -64,32 +64,25 @@ async function hinovaAutenticar() {
 }
 
 function normPlaca(p) { return String(p || "").toUpperCase().replace(/[^A-Z0-9]/g, ""); }
-function dataBR(d) { return `${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")}/${d.getFullYear()}`; }
 function tituloCase(s) { return String(s || "").toLowerCase().replace(/(^|\s)\S/g, c => c.toUpperCase()); }
 
-// Busca eventos num período (janela padrão: últimos 30 dias) e filtra por placa.
-// listar/evento da Hinova só aceita filtro por período, não por placa/CPF — filtragem é feita aqui.
-// IMPORTANTE: a Hinova rejeita (HTTP 406) intervalos maiores que 30 dias entre as datas — confirmado
-// reproduzindo a chamada diretamente ("O limite do intervalo entre as datas é de 30 dias").
-async function hinovaBuscarEventoPorPlaca(placa, dias = 30) {
-  const placaNorm = normPlaca(placa);
-  const hoje = new Date();
-  const inicio = new Date(hoje.getTime() - dias * 86400000);
-  const body = JSON.stringify({ data_cadastro: dataBR(inicio), data_cadastro_final: dataBR(hoje) });
+// Busca veículo por placa (GET direto — sem limite de período, ao contrário de listar/evento).
+// 406 com mensagem "não encontrado" é resultado normal (placa sem cadastro/terceiro) — não é erro.
+async function hinovaBuscarVeiculo(placa) {
+  const placaLimpa = normPlaca(placa);
   const headers = token => ({ "Content-Type": "application/json", Authorization: `Bearer ${token}` });
 
   let token = await hinovaAutenticar();
   let resp;
   // 5xx é instabilidade conhecida do servidor da Hinova (mesmo padrão já visto no bravax-automacao)
-  // — vale UMA retentativa curta. 406 aqui normalmente é erro de validação (não transiente), então
-  // não é retentado. Timeout também não é retentado (não melhora, só atrasa o atendente).
+  // — vale UMA retentativa curta. Timeout não é retentado (não melhora, só atrasa o atendente).
   for (let tentativa = 0; tentativa < 2; tentativa++) {
-    resp = await fetch(`${HINOVA_BASE_URL}/listar/evento`, { method: "POST", headers: headers(token), body });
+    resp = await fetch(`${HINOVA_BASE_URL}/veiculo/buscar/${placaLimpa}`, { headers: headers(token) });
 
     if (resp.status === 401) {
       hinovaToken = null; // token expirado por outro motivo — renova uma vez e tenta de novo
       token = await hinovaAutenticar();
-      resp = await fetch(`${HINOVA_BASE_URL}/listar/evento`, { method: "POST", headers: headers(token), body });
+      resp = await fetch(`${HINOVA_BASE_URL}/veiculo/buscar/${placaLimpa}`, { headers: headers(token) });
     }
 
     if (resp.ok || tentativa === 1) break;
@@ -97,47 +90,46 @@ async function hinovaBuscarEventoPorPlaca(placa, dias = 30) {
       await new Promise(r => setTimeout(r, 3000));
       continue;
     }
-    break; // erro que não é transiente de servidor (400, 401, 406 de validação, 403…) — não adianta retentar
+    break;
   }
-  if (!resp.ok) {
+
+  if (resp.status === 406) {
     // Hinova costuma devolver a causa em "error"/"mensagem" no corpo — inclui isso no erro
     // para o próximo problema aparecer explicado direto no log, sem precisar reproduzir na mão.
+    let msg = "";
+    try { const corpo = await resp.clone().json(); msg = corpo?.error?.join?.(", ") || corpo?.mensagem || ""; } catch {}
+    if (/n[ãa]o encontrad/i.test(msg)) return null; // caso normal — placa sem cadastro na Hinova
+    throw new Error(`Hinova respondeu HTTP 406${msg ? ": " + msg : ""}`);
+  }
+  if (!resp.ok) {
     let detalhe = "";
-    try {
-      const corpo = await resp.clone().json();
-      detalhe = corpo?.error?.join?.(", ") || corpo?.mensagem || "";
-    } catch {}
+    try { const corpo = await resp.clone().json(); detalhe = corpo?.error?.join?.(", ") || corpo?.mensagem || ""; } catch {}
     throw new Error(`Hinova respondeu HTTP ${resp.status}${detalhe ? ": " + detalhe : ""}`);
   }
 
   const data = await resp.json();
-  const lista = Array.isArray(data) ? data : (data.eventos || data.resultado || []);
-  const encontrados = lista.filter(ev => normPlaca(ev?.veiculo?.placa) === placaNorm);
-  if (!encontrados.length) return null;
-  encontrados.sort((a, b) => String(b.data_cadastro || "").localeCompare(String(a.data_cadastro || "")));
-  return encontrados[0];
+  const item = Array.isArray(data) ? data[0] : data;
+  return item || null;
 }
 
 // Traduz o payload cru da Hinova para os campos do formulário local.
 // Não decide tipo "antigo/novo" (não é dado da Hinova) — só marca "uber" quando a categoria confirma.
-function mapearEventoHinova(ev) {
-  const v = ev.veiculo || {};
-  const a = ev.associado || {};
+// "cor" não vem como texto (só codigo_cor, sem tabela de tradução) — fica de fora, preenchimento manual.
+function mapearVeiculoHinova(v) {
   const categoria = String(v.categoria || "").toUpperCase();
-  const fipe = parseFloat(v.valor_fipe); // sempre do objeto veiculo — o campo de topo "valor_fipe" vem zerado
+  const fipe = Number(v.valor_fipe);
+  const telefone = v.telefone_celular
+    ? `(${v.ddd_celular || v.ddd || ""}) ${v.telefone_celular}`
+    : (v.telefone ? `(${v.ddd || ""}) ${v.telefone}` : null);
   return {
-    protocoloHinova: ev.protocolo ? String(ev.protocolo) : null,
-    situacaoHinova:  ev.situacao_evento || null,
-    placa:      v.placa || null,
     veiculo:    v.modelo ? tituloCase(v.modelo) : null,
     ano:        v.ano_modelo || v.ano_fabricacao || null,
-    cor:        v.cor ? tituloCase(v.cor) : null,
-    associado:  a.nome ? tituloCase(a.nome) : null,
-    telefone:   a.telefone_celular || a.telefone || null,
-    fipe:       Number.isFinite(fipe) && fipe > 0 ? fipe : null,
+    associado:  v.nome ? tituloCase(v.nome) : null,
+    telefone,
     tipo:       categoria.includes("UBER") ? "uber" : null,
-    data:       ev.data_evento || ev.data_comunicado_evento || null,
-    descricao:  [ev.motivo, ev.envolvimento].filter(Boolean).join(" — ") || null,
+    fipe:       Number.isFinite(fipe) && fipe > 0 ? fipe : null,
+    fipeZerada: Number.isFinite(fipe) && fipe === 0,
+    situacao:   v.descricao_situacao ? tituloCase(v.descricao_situacao) : null,
   };
 }
 
@@ -289,10 +281,10 @@ async function handleApi(request, response, url) {
     }
   }
 
-  // Busca assistida de evento na Hinova por placa — SOMENTE LEITURA.
+  // Autopreenchimento de veículo/associado por placa — SOMENTE LEITURA.
   // Nunca toca em db.state/persistDb: só devolve uma sugestão para o atendente
   // preencher o formulário; quem grava continua sendo o POST /api/state de sempre.
-  if (url.pathname === "/api/hinova/buscar-evento" && request.method === "GET") {
+  if (url.pathname === "/api/hinova/buscar-veiculo" && request.method === "GET") {
     if (!getSession(request)) return send(401, { error: "Não autorizado" });
     if (!HINOVA_SGA_TOKEN || !HINOVA_USUARIO || !HINOVA_SENHA) {
       return send(400, { error: "Integração com a Hinova não configurada neste ambiente" });
@@ -300,9 +292,9 @@ async function handleApi(request, response, url) {
     const placa = url.searchParams.get("placa") || "";
     if (normPlaca(placa).length < 7) return send(400, { error: "Informe uma placa completa" });
     try {
-      const bruto = await hinovaBuscarEventoPorPlaca(placa);
+      const bruto = await hinovaBuscarVeiculo(placa);
       if (!bruto) return send(200, { encontrado: false });
-      return send(200, { encontrado: true, sugestao: mapearEventoHinova(bruto) });
+      return send(200, { encontrado: true, dados: mapearVeiculoHinova(bruto) });
     } catch (err) {
       return send(502, { error: `Hinova indisponível: ${err.message}` });
     }

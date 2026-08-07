@@ -1100,9 +1100,6 @@ dialog::backdrop { background: rgba(0,0,0,.35); backdrop-filter: blur(2px); }
 }
 .link-fipe:hover { text-decoration: underline; }
 
-.btn-hinova { background: none; border: none; cursor: pointer; font: inherit; padding: 0; margin-right: 10px; }
-.btn-hinova:disabled { opacity: .5; cursor: wait; }
-
 .hinova-status { display: block; font-size: 12px; margin-top: 4px; font-weight: 600; }
 .hinova-status.ok   { color: #166534; }
 .hinova-status.warn { color: #92400e; }
