@@ -32,6 +32,21 @@ Abra o arquivo `index.html` no navegador.
 - IA online opcional para melhorar análise quando houver chave OpenAI ou Gemini configurada.
 - Chat especialista com fallback para Ollama local quando não houver chave OpenAI/Gemini.
 
+## Busca assistida na Hinova
+
+Ao abrir "Novo Evento", o botão **🔍 Buscar na Hinova** procura, pela placa, um evento cadastrado na Hinova nos últimos 90 dias e preenche o formulário automaticamente (veículo, associado, telefone, FIPE, data, tipo quando confirmado como Uber). O atendente sempre confere e edita antes de salvar — a busca nunca grava nada sozinha, só sugere.
+
+Para ativar em produção (Railway), configure as variáveis de ambiente:
+
+```
+HINOVA_SGA_TOKEN=...
+HINOVA_USUARIO=...
+HINOVA_SENHA=...
+HINOVA_BASE_URL=https://api.hinova.com.br/api/sga/v2   (opcional, já é o padrão)
+```
+
+Sem essas variáveis, o botão continua visível mas mostra "Hinova indisponível" e o atendente preenche manualmente como sempre — não trava nada.
+
 ## Próximos passos técnicos
 
 - Migrar dados para PostgreSQL ou Supabase.

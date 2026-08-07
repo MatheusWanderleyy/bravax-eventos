@@ -36,6 +36,87 @@ function persistDb() {
 }
 function hashPin(pin, salt) { return crypto.createHash("sha256").update(salt + ":" + pin).digest("hex"); }
 
+// ─── HINOVA SGA — busca assistida de evento (SOMENTE LEITURA) ─────
+// Nunca escreve em db.state / DATA_FILE. Só sugere dados para o atendente
+// preencher no formulário — quem grava é sempre o fluxo humano de sempre (/api/state).
+const HINOVA_BASE_URL = process.env.HINOVA_BASE_URL || "https://api.hinova.com.br/api/sga/v2";
+const HINOVA_SGA_TOKEN = process.env.HINOVA_SGA_TOKEN;
+const HINOVA_USUARIO   = process.env.HINOVA_USUARIO;
+const HINOVA_SENHA     = process.env.HINOVA_SENHA;
+const HINOVA_TOKEN_TTL = 50 * 60 * 1000; // 50min — renova antes do limite real da Hinova
+
+let hinovaToken = null;
+let hinovaTokenObtidoEm = 0;
+
+async function hinovaAutenticar() {
+  if (hinovaToken && Date.now() - hinovaTokenObtidoEm < HINOVA_TOKEN_TTL) return hinovaToken;
+  const resp = await fetch(`${HINOVA_BASE_URL}/usuario/autenticar`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${HINOVA_SGA_TOKEN}` },
+    body: JSON.stringify({ usuario: HINOVA_USUARIO, senha: HINOVA_SENHA }),
+  });
+  if (!resp.ok) throw new Error(`falha na autenticação (HTTP ${resp.status})`);
+  const data = await resp.json();
+  if (data.mensagem !== "OK" || !data.token_usuario) throw new Error("autenticação recusada pela Hinova");
+  hinovaToken = data.token_usuario;
+  hinovaTokenObtidoEm = Date.now();
+  return hinovaToken;
+}
+
+function normPlaca(p) { return String(p || "").toUpperCase().replace(/[^A-Z0-9]/g, ""); }
+function dataBR(d) { return `${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")}/${d.getFullYear()}`; }
+function tituloCase(s) { return String(s || "").toLowerCase().replace(/(^|\s)\S/g, c => c.toUpperCase()); }
+
+// Busca eventos num período (janela padrão: últimos 90 dias) e filtra por placa.
+// listar/evento da Hinova só aceita filtro por período, não por placa/CPF — filtragem é feita aqui.
+async function hinovaBuscarEventoPorPlaca(placa, dias = 90) {
+  const placaNorm = normPlaca(placa);
+  const hoje = new Date();
+  const inicio = new Date(hoje.getTime() - dias * 86400000);
+  const body = JSON.stringify({ data_cadastro: dataBR(inicio), data_cadastro_final: dataBR(hoje) });
+  const headers = token => ({ "Content-Type": "application/json", Authorization: `Bearer ${token}` });
+
+  let token = await hinovaAutenticar();
+  let resp = await fetch(`${HINOVA_BASE_URL}/listar/evento`, { method: "POST", headers: headers(token), body });
+
+  if (resp.status === 401) {
+    hinovaToken = null; // token expirado por outro motivo — renova uma vez e tenta de novo
+    token = await hinovaAutenticar();
+    resp = await fetch(`${HINOVA_BASE_URL}/listar/evento`, { method: "POST", headers: headers(token), body });
+  }
+  if (!resp.ok) throw new Error(`Hinova respondeu HTTP ${resp.status}`);
+
+  const data = await resp.json();
+  const lista = Array.isArray(data) ? data : (data.eventos || data.resultado || []);
+  const encontrados = lista.filter(ev => normPlaca(ev?.veiculo?.placa) === placaNorm);
+  if (!encontrados.length) return null;
+  encontrados.sort((a, b) => String(b.data_cadastro || "").localeCompare(String(a.data_cadastro || "")));
+  return encontrados[0];
+}
+
+// Traduz o payload cru da Hinova para os campos do formulário local.
+// Não decide tipo "antigo/novo" (não é dado da Hinova) — só marca "uber" quando a categoria confirma.
+function mapearEventoHinova(ev) {
+  const v = ev.veiculo || {};
+  const a = ev.associado || {};
+  const categoria = String(v.categoria || "").toUpperCase();
+  const fipe = parseFloat(v.valor_fipe); // sempre do objeto veiculo — o campo de topo "valor_fipe" vem zerado
+  return {
+    protocoloHinova: ev.protocolo ? String(ev.protocolo) : null,
+    situacaoHinova:  ev.situacao_evento || null,
+    placa:      v.placa || null,
+    veiculo:    v.modelo ? tituloCase(v.modelo) : null,
+    ano:        v.ano_modelo || v.ano_fabricacao || null,
+    cor:        v.cor ? tituloCase(v.cor) : null,
+    associado:  a.nome ? tituloCase(a.nome) : null,
+    telefone:   a.telefone_celular || a.telefone || null,
+    fipe:       Number.isFinite(fipe) && fipe > 0 ? fipe : null,
+    tipo:       categoria.includes("UBER") ? "uber" : null,
+    data:       ev.data_evento || ev.data_comunicado_evento || null,
+    descricao:  [ev.motivo, ev.envolvimento].filter(Boolean).join(" — ") || null,
+  };
+}
+
 function getSession(request) {
   const token = (request.headers.authorization || "").replace("Bearer ", "");
   return db.sessions[token] ? { token, nome: db.sessions[token].nome } : null;
@@ -181,6 +262,25 @@ async function handleApi(request, response, url) {
       db.rev += 1;
       persistDb();
       return send(200, { rev: db.rev });
+    }
+  }
+
+  // Busca assistida de evento na Hinova por placa — SOMENTE LEITURA.
+  // Nunca toca em db.state/persistDb: só devolve uma sugestão para o atendente
+  // preencher o formulário; quem grava continua sendo o POST /api/state de sempre.
+  if (url.pathname === "/api/hinova/buscar-evento" && request.method === "GET") {
+    if (!getSession(request)) return send(401, { error: "Não autorizado" });
+    if (!HINOVA_SGA_TOKEN || !HINOVA_USUARIO || !HINOVA_SENHA) {
+      return send(400, { error: "Integração com a Hinova não configurada neste ambiente" });
+    }
+    const placa = url.searchParams.get("placa") || "";
+    if (normPlaca(placa).length < 7) return send(400, { error: "Informe uma placa completa" });
+    try {
+      const bruto = await hinovaBuscarEventoPorPlaca(placa);
+      if (!bruto) return send(200, { encontrado: false });
+      return send(200, { encontrado: true, sugestao: mapearEventoHinova(bruto) });
+    } catch (err) {
+      return send(502, { error: `Hinova indisponível: ${err.message}` });
     }
   }
 

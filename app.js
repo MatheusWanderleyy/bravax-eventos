@@ -32,6 +32,7 @@ let chatHistory = [];
 let chatPendingImg  = null; // { base64, url }
 let pendingConfirm  = null; // resultado da IA aguardando confirmação
 let editingEvtId    = null;
+let hinovaProtocoloBusca = null; // protocolo Hinova vinculado nesta sessão de edição do formulário
 let cotacaoCtx      = null; // { eventoId, pecaId, prefillFornId }
 let waCtx           = null; // { eventoId, fornId }
 
@@ -679,6 +680,59 @@ function copiarPlacaFipe() {
   setTimeout(() => { link.textContent = '🔎 Consultar no PlacaFipe'; }, 5000);
 }
 
+// Busca assistida na Hinova: só preenche os campos do formulário, atendente confirma e salva.
+// Nunca grava nada sozinha — o salvamento continua sendo o clique em "Salvar" de sempre.
+async function buscarNaHinova() {
+  const f = document.getElementById('formEvento');
+  const btn = document.getElementById('btnBuscarHinova');
+  const statusEl = document.getElementById('hinovaStatus');
+  const fipeHint = document.getElementById('fipeHinovaHint');
+  const placa = f.placa.value.trim();
+
+  fipeHint.classList.add('hidden');
+  statusEl.classList.remove('hidden');
+
+  if (placa.replace(/[^a-z0-9]/gi, '').length < 7) {
+    statusEl.textContent = 'Digite a placa completa antes de buscar.';
+    statusEl.className = 'hinova-status warn';
+    return;
+  }
+
+  btn.disabled = true;
+  statusEl.textContent = '🔄 Buscando na Hinova…';
+  statusEl.className = 'hinova-status warn';
+
+  try {
+    const data = await api(`/api/hinova/buscar-evento?placa=${encodeURIComponent(placa)}`);
+    if (!data.encontrado) {
+      statusEl.textContent = 'Nenhum evento encontrado na Hinova para essa placa nos últimos 90 dias — preencha manualmente.';
+      statusEl.className = 'hinova-status warn';
+      return;
+    }
+    const s = data.sugestao;
+    if (s.veiculo)   f.veiculo.value   = s.veiculo;
+    if (s.ano)       f.ano.value       = s.ano;
+    if (s.cor)       f.cor.value       = s.cor;
+    if (s.associado) f.associado.value = s.associado;
+    if (s.telefone)  f.telefone.value  = s.telefone;
+    if (s.data)       f.data.value      = s.data;
+    if (s.descricao && !f.descricao.value) f.descricao.value = s.descricao;
+    if (s.tipo)        f.tipo.value      = s.tipo;
+    if (s.fipe) {
+      f.fipe.value = formatMoeda(s.fipe);
+      fipeHint.classList.remove('hidden');
+    }
+    hinovaProtocoloBusca = s.protocoloHinova || null;
+    statusEl.textContent = `✅ Preenchido com dados do evento Hinova (protocolo ${s.protocoloHinova || '—'}, situação: ${s.situacaoHinova || '—'}). Confira todos os campos antes de salvar.`;
+    statusEl.className = 'hinova-status ok';
+  } catch (err) {
+    statusEl.textContent = `⚠️ Hinova indisponível (${err.message}) — preencha manualmente.`;
+    statusEl.className = 'hinova-status err';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 // Ajusta o formulário conforme o tipo de evento (associado × terceiro)
 function atualizarFormTerceiro() {
   const ehTerceiro = document.getElementById('chkEhTerceiro').checked;
@@ -699,12 +753,15 @@ function popularListaAssociados() {
 
 function openNovoEvento() {
   editingEvtId = null;
+  hinovaProtocoloBusca = null;
   const f = document.getElementById('formEvento');
   f.reset();
   f.data.value = new Date().toISOString().split('T')[0];
   popularListaAssociados();
   atualizarFormTerceiro();
   atualizarLinkFipe();
+  document.getElementById('hinovaStatus').classList.add('hidden');
+  document.getElementById('fipeHinovaHint').classList.add('hidden');
   document.getElementById('dlgEventoTitle').textContent = 'Novo Evento';
   document.getElementById('dlgEvento').showModal();
 }
@@ -730,6 +787,16 @@ function openEditEvento(eventoId) {
   popularListaAssociados();
   atualizarFormTerceiro();
   atualizarLinkFipe();
+  hinovaProtocoloBusca = evt.protocoloHinova || null;
+  const statusEl = document.getElementById('hinovaStatus');
+  document.getElementById('fipeHinovaHint').classList.add('hidden');
+  if (evt.protocoloHinova) {
+    statusEl.textContent = `Vinculado ao protocolo Hinova ${evt.protocoloHinova}.`;
+    statusEl.className = 'hinova-status ok';
+    statusEl.classList.remove('hidden');
+  } else {
+    statusEl.classList.add('hidden');
+  }
   document.getElementById('dlgEventoTitle').textContent = 'Editar Evento';
   document.getElementById('dlgEvento').showModal();
 }
@@ -838,6 +905,7 @@ function setupForms() {
       ehTerceiro,
       associadoEnvolvido: ehTerceiro ? f.associadoEnvolvido.value.trim() : '',
     };
+    if (hinovaProtocoloBusca) dados.protocoloHinova = hinovaProtocoloBusca;
     const dupEvt = state.eventos.find(e => e.placa === dados.placa && e.id !== editingEvtId && !e.encerrado);
     if (dupEvt && !confirm(`Já existe um evento aberto com a placa ${dados.placa} (${dupEvt.associado}).\n\nDeseja continuar mesmo assim?`)) {
       return;
@@ -909,6 +977,7 @@ function setupForms() {
 
   document.getElementById('chkEhTerceiro').addEventListener('change', atualizarFormTerceiro);
   document.getElementById('formEvento').placa.addEventListener('input', atualizarLinkFipe);
+  document.getElementById('btnBuscarHinova').addEventListener('click', buscarNaHinova);
 
   // Fornecedor
   document.getElementById('formFornecedor').addEventListener('submit', e => {

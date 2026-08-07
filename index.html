@@ -121,7 +121,9 @@
         🚙 Este carro é de um terceiro (não associado)
       </label>
       <label>Placa<input name="placa" required placeholder="QXX0A00" autocomplete="off" />
+        <button type="button" id="btnBuscarHinova" class="link-fipe btn-hinova">🔍 Buscar na Hinova</button>
         <a id="linkFipeForm" class="link-fipe hidden" href="https://placafipe.com.br/" target="_blank" onclick="copiarPlacaFipe();event.stopPropagation()">🔎 Consultar no PlacaFipe</a>
+        <span id="hinovaStatus" class="hinova-status hidden"></span>
       </label>
       <label>Veículo<input name="veiculo" required placeholder="Onix Joy" /></label>
       <label>Ano<input name="ano" inputmode="numeric" maxlength="4" placeholder="2023" /></label>
@@ -139,7 +141,9 @@
           <option value="novo">Associado novo — cota 5%</option>
         </select>
       </label>
-      <label id="lblFipe">Valor FIPE (R$)<input name="fipe" inputmode="decimal" placeholder="50000" /></label>
+      <label id="lblFipe">Valor FIPE (R$)<input name="fipe" inputmode="decimal" placeholder="50000" />
+        <span id="fipeHinovaHint" class="fipe-hinova-hint hidden">💡 Valor sugerido pela Hinova — confira antes de salvar</span>
+      </label>
       <label>Data da ocorrência<input name="data" type="date" /></label>
       <label class="full">Descrição
         <textarea name="descricao" rows="2" placeholder="Resumo da ocorrência (opcional)"></textarea>
