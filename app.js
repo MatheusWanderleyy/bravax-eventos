@@ -9,7 +9,7 @@ const AI_CFG_KEY = 'bravax-ai-cfg';
 const TPL_KEY    = 'bravax-templates';
 const CEP        = '51020-280';
 const COTAS      = { uber: 7, antigo: 6, novo: 5 };
-const DIAS_PARADO = 5;
+const DIAS_PARADO = 45;
 
 const DEFAULT_TPL = {
   cotacao: `Olá {{fornecedor}}! Tudo bem?\n\nPreciso de uma cotação para o veículo abaixo:\n\n🚗 {{veiculo}}\n🔑 Placa: {{placa}}\n\nPeças necessárias:\n{{pecas}}\n\nFavor informar por peça:\n- Valor unitário\n- Frete para Recife/PE (CEP: {{cep}})\n- Prazo de entrega\n- Garantia\n\nObrigado!`,
@@ -154,6 +154,17 @@ function diasSemAtualizacao(evt) {
   else if (evt.data) ultima = new Date(evt.data + 'T12:00:00').getTime();
   else return null;
   return Math.floor((Date.now() - ultima) / 86400000);
+}
+
+// Retorna {texto, stale} para exibir os dias desde a última atualização.
+// Só vira alerta ("parado") após DIAS_PARADO dias; antes disso é só informativo.
+function labelDiasAtualizacao(dias) {
+  if (dias === null) return null;
+  const stale = dias >= DIAS_PARADO;
+  return {
+    texto: stale ? `⏰ ${dias}d parado` : `${dias}d desde últ. atualização`,
+    stale,
+  };
 }
 
 function historicoPeca(nomePeca) {
@@ -303,8 +314,7 @@ function _renderList() {
   list.innerHTML = filtered.map(evt => {
     const st = computeStatus(evt);
     const nCot = evt.pecas?.reduce((n, p) => n + (p.cotacoes?.length || 0), 0) || 0;
-    const dias = diasSemAtualizacao(evt);
-    const stale = dias !== null && dias >= DIAS_PARADO;
+    const diasInfo = labelDiasAtualizacao(diasSemAtualizacao(evt));
     return `
       <div class="evt-card dot-${st.cls} ${evt.id === selectedId ? 'selected' : ''}"
            onclick="selectEvento('${evt.id}')">
@@ -313,7 +323,7 @@ function _renderList() {
           <span class="evt-dot">${st.label}</span>
         </div>
         <div class="evt-nome">${evt.ehTerceiro ? '🚙 ' : ''}${evt.associado}</div>
-        <div class="evt-sub">${evt.veiculo || '—'}${evt.ano ? ' ' + evt.ano : ''} · ${evt.pecas?.length || 0}p · ${nCot}q${stale ? ` · <span class="stale-flag">⏰ ${dias}d parado</span>` : ''}</div>
+        <div class="evt-sub">${evt.veiculo || '—'}${evt.ano ? ' ' + evt.ano : ''} · ${evt.pecas?.length || 0}p · ${nCot}q${diasInfo ? ` · <span class="${diasInfo.stale ? 'stale-flag' : 'dias-flag'}">${diasInfo.texto}</span>` : ''}</div>
       </div>`;
   }).join('');
 }
@@ -345,8 +355,7 @@ function _renderDetail() {
 
   const st   = computeStatus(evt);
   const cota = calcCota(evt);
-  const diasParado = diasSemAtualizacao(evt);
-  const isStale = diasParado !== null && diasParado >= DIAS_PARADO;
+  const diasInfo = labelDiasAtualizacao(diasSemAtualizacao(evt));
 
   panel.innerHTML = `
     <div class="detail-wrap">
@@ -360,7 +369,7 @@ function _renderDetail() {
             ${evt.placa}
             <span class="badge badge-${st.cls}">${st.label}</span>
             ${evt.ehTerceiro ? '<span class="badge badge-gray">Terceiro</span>' : ''}
-            ${isStale ? `<span class="badge badge-stale">⏰ ${diasParado}d parado</span>` : ''}
+            ${diasInfo ? `<span class="badge ${diasInfo.stale ? 'badge-stale' : 'badge-dias'}">${diasInfo.texto}</span>` : ''}
           </div>
           <div class="detail-veiculo">${descreveVeiculo(evt) || '—'}</div>
           <div class="detail-info">
@@ -611,6 +620,7 @@ function renderComparativo(evt) {
 
 function selectEvento(id) {
   selectedId = id;
+  editandoAtId = null;
   document.body.classList.add('mobile-detail');
   renderAll();
 }
@@ -1591,6 +1601,8 @@ function setupListeners() {
 
 // ─── ATUALIZAÇÕES (timeline) ─────────────────────────────────────
 
+let editandoAtId = null;
+
 function renderAtualizacoes(evt) {
   const ats = [...(evt.atualizacoes || [])].reverse();
   if (!ats.length) return '<div class="tl-empty">Nenhuma atualização ainda. Registre aqui visitas, contatos e andamentos.</div>';
@@ -1598,11 +1610,32 @@ function renderAtualizacoes(evt) {
     const d = new Date(a.data);
     const quando = d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) + ' ' +
                    d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    let editadoTxt = '';
+    if (a.editadoEm) {
+      const de = new Date(a.editadoEm);
+      editadoTxt = ` <span class="tl-edited">· editado ${de.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} ${de.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</span>`;
+    }
+
+    if (editandoAtId === a.id) {
+      return `
+      <div class="tl-item">
+        <div class="tl-head">
+          <strong>${a.autor}</strong><span>${quando}</span>${editadoTxt}
+        </div>
+        <textarea class="tl-edit-textarea" id="tlEditTextarea" rows="3"></textarea>
+        <div class="tl-edit-btns">
+          <button class="btn-ghost-sm" onclick="cancelarEdicaoAtualizacao()">Cancelar</button>
+          <button class="btn-wa-save" onclick="salvarEdicaoAtualizacao('${evt.id}','${a.id}')">Salvar edição</button>
+        </div>
+      </div>`;
+    }
+
     return `
       <div class="tl-item">
         <div class="tl-head">
-          <strong>${a.autor}</strong><span>${quando}</span>
+          <strong>${a.autor}</strong><span>${quando}</span>${editadoTxt}
           <div class="tl-actions">
+            <button class="row-act-btn" onclick="editarAtualizacaoUI('${evt.id}','${a.id}')" title="Editar">✏️</button>
             <button class="row-act-btn" onclick="enviarAtualizacaoWA('${evt.id}','${a.id}')" title="Enviar no WhatsApp">📤</button>
             <button class="row-act-btn row-act-danger" onclick="delAtualizacao('${evt.id}','${a.id}')" title="Excluir">✕</button>
           </div>
@@ -1610,6 +1643,39 @@ function renderAtualizacoes(evt) {
         <div class="tl-text">${a.texto}</div>
       </div>`;
   }).join('') + '</div>';
+}
+
+function editarAtualizacaoUI(eventoId, atId) {
+  editandoAtId = atId;
+  renderDetail();
+  setTimeout(() => {
+    const ta = document.getElementById('tlEditTextarea');
+    const at = state.eventos.find(e => e.id === eventoId)?.atualizacoes?.find(a => a.id === atId);
+    if (ta && at) {
+      ta.value = at.texto;
+      ta.focus();
+      ta.setSelectionRange(ta.value.length, ta.value.length);
+    }
+  }, 0);
+}
+
+function cancelarEdicaoAtualizacao() {
+  editandoAtId = null;
+  renderDetail();
+}
+
+function salvarEdicaoAtualizacao(eventoId, atId) {
+  const ta = document.getElementById('tlEditTextarea');
+  const novoTexto = ta?.value.trim();
+  if (!novoTexto) return;
+  const evt = state.eventos.find(e => e.id === eventoId);
+  const at  = evt?.atualizacoes?.find(a => a.id === atId);
+  if (!at) return;
+  at.texto = novoTexto;
+  at.editadoEm = new Date().toISOString();
+  editandoAtId = null;
+  saveState();
+  renderDetail();
 }
 
 function addAtualizacao(eventoId, enviarWA) {

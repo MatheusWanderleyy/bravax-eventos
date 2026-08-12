@@ -135,6 +135,7 @@ button { cursor: pointer; border: none; }
 .evt-nome { color: rgba(255,255,255,.88); font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .evt-sub  { color: rgba(255,255,255,.45); font-size: 11px; margin-top: 2px; }
 .stale-flag { color: #fbbf24; font-weight: 700; }
+.dias-flag  { color: rgba(255,255,255,.45); }
 
 .list-empty { color: rgba(255,255,255,.4); text-align: center; padding: 24px 12px; font-size: 13px; }
 
@@ -232,6 +233,8 @@ button { cursor: pointer; border: none; }
 .badge-green::before { background: #22c55e; }
 .badge-stale  { background: #fffbeb; color: #92400e; }
 .badge-stale::before { background: #f59e0b; }
+.badge-dias   { background: var(--bg); color: var(--muted); }
+.badge-dias::before { background: #9ca3af; }
 
 /* ── COTA CARD ── */
 
@@ -1139,6 +1142,20 @@ dialog::backdrop { background: rgba(0,0,0,.35); backdrop-filter: blur(2px); }
 .tl-actions { margin-left: auto; display: flex; gap: 2px; }
 
 .tl-text { font-size: 13px; line-height: 1.5; white-space: pre-wrap; }
+
+.tl-edited { font-style: italic; color: var(--muted); }
+
+.tl-edit-textarea {
+  width: 100%;
+  border: 1px solid var(--red);
+  border-radius: 7px;
+  padding: 8px 10px;
+  font-size: 13px;
+  resize: vertical;
+  margin-top: 4px;
+}
+.tl-edit-textarea:focus { outline: 2px solid var(--red); outline-offset: -1px; }
+.tl-edit-btns { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
 
 .tl-empty { padding: 14px 18px; font-size: 13px; color: var(--muted); }
 
