@@ -1038,8 +1038,24 @@ async function handleFotoUpload(event, eventoId) {
   await processarFoto(file, eventoId);
 }
 
+// Reduz a foto (máx. 1600px, JPEG) antes de enviar para a IA: foto de celular crua
+// passa do limite do servidor/Groq. Se o navegador não conseguir ler o formato, envia original.
+async function base64ParaIA(file) {
+  try { return await comprimirImagem(file); }
+  catch { return await fileToBase64(file); }
+}
+
+// A IA às vezes responde "Paralelo"/"original usado"; converte para os tipos do sistema.
+function normalizaTipo(t) {
+  const s = String(t || '').toLowerCase();
+  if (s.startsWith('paral')) return 'Paralela';
+  if (s.startsWith('recond')) return 'Recondicionada';
+  if (s.startsWith('usad')) return 'Usada';
+  return 'Original';
+}
+
 async function processarFoto(file, eventoId) {
-  const base64 = await fileToBase64(file);
+  const base64 = await base64ParaIA(file);
 
   // Mostrar loading
   const dlg = document.getElementById('dlgFotoConfirm');
@@ -1089,7 +1105,7 @@ function renderFotoConfirm(resultado) {
               <label>Tipo
                 <select class="fp-tipo" data-i="${i}">
                   ${['Original','Paralela','Usada','Recondicionada'].map(t =>
-                    `<option ${t === (p.tipo || 'Original') ? 'selected' : ''}>${t}</option>`
+                    `<option ${t === normalizaTipo(p.tipo) ? 'selected' : ''}>${t}</option>`
                   ).join('')}
                 </select>
               </label>
@@ -1581,7 +1597,7 @@ function setupListeners() {
   });
   document.getElementById('cwFile')?.addEventListener('change', async e => {
     const file = e.target.files?.[0]; if (!file) return; e.target.value = '';
-    const base64 = await fileToBase64(file);
+    const base64 = await base64ParaIA(file);
     chatPendingImg = { base64, url: URL.createObjectURL(file) };
     document.getElementById('cwImgPreview').src = chatPendingImg.url;
     document.getElementById('cwImgWrap').classList.remove('hidden');

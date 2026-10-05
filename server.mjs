@@ -338,9 +338,10 @@ const server = http.createServer(async (request, response) => {
         if (process.env.GROQ_API_KEY) {
           // ── Modo cloud: traduz Ollama → Groq ──────────────────────
           const hasImages = parsed.messages.some(m => m.images?.length);
+          // Modelos configuráveis por variável no Railway (a Groq troca/desliga modelos de tempos em tempos)
           const model = hasImages
-            ? "meta-llama/llama-4-scout-17b-16e-instruct"
-            : "llama-3.3-70b-versatile";
+            ? (process.env.GROQ_VISION_MODEL || "qwen/qwen3.8-27b")
+            : (process.env.GROQ_TEXT_MODEL   || "qwen/qwen3.8-27b");
 
           const groqMessages = parsed.messages.map(msg => {
             if (msg.images?.length) {
@@ -364,7 +365,7 @@ const server = http.createServer(async (request, response) => {
               "Content-Type": "application/json",
               "Authorization": `Bearer ${process.env.GROQ_API_KEY}`,
             },
-            body: JSON.stringify({ model, messages: groqMessages }),
+            body: JSON.stringify({ model, messages: groqMessages, temperature: 0.3 }),
           });
 
           const groqData = await groqResp.json();
