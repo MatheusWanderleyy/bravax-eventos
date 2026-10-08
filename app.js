@@ -14,7 +14,58 @@ const DIAS_PARADO = 45;
 const DEFAULT_TPL = {
   cotacao: `Olá {{fornecedor}}! Tudo bem?\n\nPreciso de uma cotação para o veículo abaixo:\n\n🚗 {{veiculo}}\n🔑 Placa: {{placa}}\n\nPeças necessárias:\n{{pecas}}\n\nFavor informar por peça:\n- Valor unitário\n- Frete para Recife/PE (CEP: {{cep}})\n- Prazo de entrega\n- Garantia\n\nObrigado!`,
   atualizacao: `🔔 *ATUALIZAÇÃO DE EVENTO*\n\n🚗 {{veiculo}} — {{placa}}\n👤 {{associado}}\n📋 {{numero}}\n\n📝 {{texto}}\n\n— {{autor}}, {{quando}}\n\n🔗 Ver no sistema: {{link}}`,
+  vidroCoberto: `Olá, {{associado}}! Tudo bem? 😊\n\nAqui é da Bravax Protege. Confirmamos que o seu plano *{{plano}}* cobre a troca de *{{peca}}* do seu {{veiculo}} (placa {{placa}}).\n\n💰 Valor total da troca: *{{valor_total}}*\n✅ A Bravax paga 70%: *{{valor_bravax}}*\n👤 Sua participação (30%): *{{valor_associado}}*\n\nAssim que você confirmar, seguimos com o agendamento da troca.\n\nℹ️ A cobertura de vidros vale para 1 troca a cada 12 meses.`,
+  vidroSemCobertura: `Olá, {{associado}}! Tudo bem?\n\nAqui é da Bravax Protege. Verificamos o seu {{veiculo}} (placa {{placa}}) e o plano *{{plano}}* não inclui a cobertura de *{{peca}}*.\n\n💡 No plano *Platinum* você tem cobertura de todos os vidros, faróis e lanternas — e a Bravax paga 70% de cada troca.\n\nQuer que a gente te passe os valores para migrar de plano?`,
+  vidroLimite: `Olá, {{associado}}! Tudo bem?\n\nAqui é da Bravax Protege. A cobertura de vidros do seu plano permite *1 troca a cada 12 meses*, e a última troca do seu {{veiculo}} (placa {{placa}}) foi em *{{ultima_troca}}*.\n\nA próxima troca coberta fica disponível a partir de *{{proxima_troca}}*. Se precisar antes disso, podemos te ajudar com uma cotação particular.`,
 };
+
+// ─── VIDROS / PARA-BRISA ────────────────────────────────────────
+const VIDRO_BRAVAX_PCT = 70;          // Bravax paga 70% do valor total da troca
+const VIDRO_INTERVALO_DIAS = 365;     // 1 troca coberta a cada 12 meses
+const PECAS_POR_COBERTURA = {
+  nenhuma:   [],
+  parabrisa: ['Para-brisa'],
+  todos:     ['Para-brisa', 'Vidro lateral', 'Vigia (vidro traseiro)', 'Farol', 'Lanterna'],
+};
+const TEXTO_COBERTURA = {
+  nenhuma:   'sem cobertura de vidros',
+  parabrisa: 'só para-brisa',
+  todos:     'todos os vidros, faróis e lanternas',
+};
+
+function categoriaDoEvento(evt) {
+  if (evt.categoriaEvento === 'vidro') return 'vidro';
+  return evt.ehTerceiro ? 'terceiro' : 'colisao';
+}
+
+// true = coberto, false = não coberto, null = cobertura ainda não confirmada
+function pecaCoberta(cobertura, peca) {
+  if (!PECAS_POR_COBERTURA[cobertura]) return null;
+  return PECAS_POR_COBERTURA[cobertura].includes(peca);
+}
+
+function normPlacaCli(p) { return String(p || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); }
+
+// Última troca de vidro COBERTA do mesmo veículo a menos de 12 meses da data informada
+function trocaVidroRecente(placa, dataRef, ignorarId) {
+  const p = normPlacaCli(placa);
+  const ref = new Date((dataRef || new Date().toISOString().split('T')[0]) + 'T12:00:00').getTime();
+  const achados = state.eventos
+    // Pedido barrado pelo próprio limite não conta como troca realizada
+    .filter(e => e.id !== ignorarId && categoriaDoEvento(e) === 'vidro' && e.coberto === true && !e.bloqueadoLimite && e.data && normPlacaCli(e.placa) === p)
+    .map(e => ({ evt: e, t: new Date(e.data + 'T12:00:00').getTime() }))
+    .filter(x => Math.abs(ref - x.t) < VIDRO_INTERVALO_DIAS * 86400000)
+    .sort((a, b) => b.t - a.t);
+  if (!achados.length) return null;
+  const proxima = new Date(achados[0].t + VIDRO_INTERVALO_DIAS * 86400000);
+  return { evt: achados[0].evt, ultima: new Date(achados[0].t), proxima };
+}
+
+function divisaoVidro(valor) {
+  const total = parseFloat(valor) || 0;
+  const bravax = Math.round(total * VIDRO_BRAVAX_PCT) / 100;
+  return { total, bravax, associado: Math.round((total - bravax) * 100) / 100 };
+}
 
 // ─── ESTADO ─────────────────────────────────────────────────────
 let state       = { fornecedores: [], eventos: [] };
@@ -190,14 +241,17 @@ function historicoPeca(nomePeca) {
 }
 
 function calcCota(evt) {
-  if (!evt.fipe) return null;
+  if (categoriaDoEvento(evt) === 'vidro' || !evt.fipe) return null;
   return (parseFloat(evt.fipe) * (COTAS[evt.tipo] || 5)) / 100;
 }
 
 function computeStatus(evt) {
   if (evt.encerrado) return { label: 'Encerrado', cls: 'green' };
   const ck = evt.checklist || {};
-  const itens = evt.ehTerceiro
+  const cat = categoriaDoEvento(evt);
+  const itens = cat === 'vidro'
+    ? [ck.comunicou0800, ck.cotaPaga, ck.termoAssociado]
+    : cat === 'terceiro'
     ? [ck.comunicou0800, ck.boRealizado, ck.termoAssociado]
     : [ck.comunicou0800, ck.boRealizado, ck.cotaPaga, ck.termoAssociado];
   const done = itens.filter(Boolean).length;
@@ -304,6 +358,8 @@ function _renderList() {
     filtered = filtered.filter(e => { const d = diasSemAtualizacao(e); return d !== null && d >= DIAS_PARADO; });
   } else if (filtroAtivo === 'terceiros') {
     filtered = filtered.filter(e => e.ehTerceiro);
+  } else if (filtroAtivo === 'vidros') {
+    filtered = filtered.filter(e => categoriaDoEvento(e) === 'vidro');
   }
 
   if (!filtered.length) {
@@ -322,7 +378,7 @@ function _renderList() {
           <span class="evt-placa">${evt.placa}</span>
           <span class="evt-dot">${st.label}</span>
         </div>
-        <div class="evt-nome">${evt.ehTerceiro ? '🚙 ' : ''}${evt.associado}</div>
+        <div class="evt-nome">${evt.ehTerceiro ? '🚙 ' : ''}${categoriaDoEvento(evt) === 'vidro' ? '🪟 ' : ''}${evt.associado}</div>
         <div class="evt-sub">${evt.veiculo || '—'}${evt.ano ? ' ' + evt.ano : ''} · ${evt.pecas?.length || 0}p · ${nCot}q${diasInfo ? ` · <span class="${diasInfo.stale ? 'stale-flag' : 'dias-flag'}">${diasInfo.texto}</span>` : ''}</div>
       </div>`;
   }).join('');
@@ -369,6 +425,7 @@ function _renderDetail() {
             ${evt.placa}
             <span class="badge badge-${st.cls}">${st.label}</span>
             ${evt.ehTerceiro ? '<span class="badge badge-gray">Terceiro</span>' : ''}
+            ${categoriaDoEvento(evt) === 'vidro' ? '<span class="badge badge-gray">Vidros</span>' : ''}
             ${diasInfo ? `<span class="badge ${diasInfo.stale ? 'badge-stale' : 'badge-dias'}">${diasInfo.texto}</span>` : ''}
           </div>
           <div class="detail-veiculo">${descreveVeiculo(evt) || '—'}</div>
@@ -391,8 +448,8 @@ function _renderDetail() {
         </div>
       </div>
 
-      <!-- COTA DE PARTICIPAÇÃO / TERCEIRO -->
-      ${evt.ehTerceiro ? `
+      <!-- COTA DE PARTICIPAÇÃO / TERCEIRO / VIDROS -->
+      ${categoriaDoEvento(evt) === 'vidro' ? renderVidroCard(evt) : evt.ehTerceiro ? `
         <div class="terceiro-card">
           <div>
             <div class="cota-label">Carro de terceiro — sem cota de participação</div>
@@ -408,6 +465,7 @@ function _renderDetail() {
           <div class="cota-detalhe">
             FIPE ${moeda(evt.fipe)} × ${COTAS[evt.tipo]}%<br>
             ${evt.tipo === 'uber' ? 'Uber' : evt.tipo === 'antigo' ? 'Assoc. antigo' : 'Assoc. novo'}
+            ${evt.fipeReferencia ? `<br><span class="fipe-ref">Tabela FIPE de ${evt.fipeReferencia}</span>` : ''}
           </div>
         </div>
       ` : ''}
@@ -471,10 +529,69 @@ function _renderDetail() {
     </div>`;
 }
 
+// ── Cartão de vidros (cobertura + divisão 70/30) ─────────────────
+function renderVidroCard(evt) {
+  const cob = evt.coberturaVidros;
+  const coberto = pecaCoberta(cob, evt.pecaVidro);
+  const recente = trocaVidroRecente(evt.placa, evt.data, evt.id);
+  const div = divisaoVidro(evt.valorVidro);
+  const fmt = d => d.toLocaleDateString('pt-BR');
+
+  let veredito;
+  if (coberto === null) veredito = `<div class="vidro-veredito warn">⚠️ Cobertura não confirmada — confira o plano no SGA e edite o evento.</div>`;
+  else if (!coberto) veredito = `<div class="vidro-veredito err">❌ ${evt.pecaVidro} não é coberto pelo plano ${evt.planoVeiculo || ''} (${TEXTO_COBERTURA[cob]}).</div>`;
+  else if (recente) veredito = `<div class="vidro-veredito err">❌ Limite de 1 troca a cada 12 meses — última troca coberta em ${fmt(recente.ultima)} (evento ${recente.evt.numero}). Próxima a partir de ${fmt(recente.proxima)}.</div>`;
+  else veredito = `<div class="vidro-veredito ok">✅ ${evt.pecaVidro} coberto pelo plano ${evt.planoVeiculo || ''} (${TEXTO_COBERTURA[cob]}).</div>`;
+
+  return `
+    <div class="vidro-card">
+      <div class="cota-label">Cobertura de vidros${evt.planoVeiculo ? ' · Plano ' + evt.planoVeiculo : ''}</div>
+      ${veredito}
+      ${coberto && !recente ? (div.total > 0 ? `
+        <div class="vidro-split">
+          <div><span>Valor total</span><strong>${moeda(div.total)}</strong></div>
+          <div><span>Bravax (${VIDRO_BRAVAX_PCT}%)</span><strong>${moeda(div.bravax)}</strong></div>
+          <div class="destaque"><span>Associado (${100 - VIDRO_BRAVAX_PCT}%)</span><strong>${moeda(div.associado)}</strong></div>
+        </div>` : `<div class="vidro-sem-valor">Informe o valor total cotado (botão ✏️ Editar) para calcular a divisão 70% Bravax / 30% associado.</div>`) : ''}
+      <div class="vidro-acoes">
+        <button class="btn-wa-save" onclick="enviarMsgVidroAssociado('${evt.id}')">💬 Mensagem ao associado</button>
+      </div>
+    </div>`;
+}
+
+function enviarMsgVidroAssociado(eventoId) {
+  const evt = state.eventos.find(e => e.id === eventoId);
+  if (!evt) return;
+  const coberto = pecaCoberta(evt.coberturaVidros, evt.pecaVidro);
+  if (coberto === null) { alert('Confirme a cobertura de vidros (edite o evento) antes de enviar a mensagem ao associado.'); return; }
+  const recente = coberto ? trocaVidroRecente(evt.placa, evt.data, evt.id) : null;
+  const div = divisaoVidro(evt.valorVidro);
+  if (coberto && !recente && !div.total) { alert('Informe o valor total cotado (✏️ Editar) antes de enviar a mensagem ao associado.'); return; }
+
+  const tpl = !coberto ? templates.vidroSemCobertura : recente ? templates.vidroLimite : templates.vidroCoberto;
+  const msg = preencherTemplate(tpl, {
+    associado: (evt.associado || '').split(' ')[0],
+    veiculo: descreveVeiculo(evt), placa: evt.placa,
+    plano: evt.planoVeiculo || '—', peca: (evt.pecaVidro || '').toLowerCase(),
+    cobertura: TEXTO_COBERTURA[evt.coberturaVidros] || '—',
+    valor_total: moeda(div.total), valor_bravax: moeda(div.bravax), valor_associado: moeda(div.associado),
+    ultima_troca: recente ? recente.ultima.toLocaleDateString('pt-BR') : '',
+    proxima_troca: recente ? recente.proxima.toLocaleDateString('pt-BR') : '',
+  });
+  const tel = String(evt.telefone || '').replace(/\D/g, '');
+  const numero = tel.length >= 10 ? (tel.startsWith('55') ? tel : '55' + tel) : '';
+  window.open(`https://wa.me/${numero}?text=${encodeURIComponent(msg)}`, '_blank');
+}
+
 // ── Checklist ────────────────────────────────────────────────────
 function renderChecklist(evt) {
   const ck = evt.checklist || {};
-  const items = [
+  const ehVidro = categoriaDoEvento(evt) === 'vidro';
+  const items = ehVidro ? [
+    { key: 'comunicou0800',  label: '0800' },
+    { key: 'cotaPaga',       label: 'Participação 30% paga' },
+    { key: 'termoAssociado', label: 'Termo' },
+  ] : [
     { key: 'comunicou0800',  label: '0800' },
     { key: 'boRealizado',    label: 'BO' },
     ...(evt.ehTerceiro ? [] : [{ key: 'cotaPaga', label: 'Cota paga' }]),
@@ -694,6 +811,14 @@ function copiarPlacaFipe() {
 // nunca grava nada sozinho — o salvamento continua sendo o clique em "Salvar" de sempre.
 let hinovaBuscaSeq  = 0; // invalida respostas atrasadas de buscas anteriores/canceladas
 let hinovaBuscaTimer = null;
+// Dados do veículo vindos do SGA para o formulário aberto (plano, cobertura, código FIPE)
+let veiculoForm = null;
+// Último FIPE preenchido automaticamente — se o atendente mudar o valor, a fonte vira "manual"
+let fipeAuto = null;
+
+function tipoEventoForm() {
+  return document.querySelector('#formEvento input[name="tipoEvento"]:checked')?.value || 'colisao';
+}
 
 function agendarBuscaHinova() {
   clearTimeout(hinovaBuscaTimer);
@@ -702,7 +827,7 @@ function agendarBuscaHinova() {
   const statusEl = document.getElementById('hinovaStatus');
   const fipeHint = document.getElementById('fipeHinovaHint');
 
-  if (f.ehTerceiro.checked) { statusEl.classList.add('hidden'); return; } // Hinova só conhece veículo de associado
+  if (tipoEventoForm() === 'terceiro') { statusEl.classList.add('hidden'); return; } // Hinova só conhece veículo de associado
 
   const placa = f.placa.value.trim();
   if (placa.replace(/[^a-z0-9]/gi, '').length < 7) {
@@ -728,8 +853,10 @@ async function buscarVeiculoNaHinova(placa) {
     if (meuSeq !== hinovaBuscaSeq) return; // atendente já mudou a placa/fechou o modal — descarta
 
     if (!data.encontrado) {
+      veiculoForm = null;
       statusEl.textContent = 'Placa não encontrada no SGA — preencha manualmente.';
       statusEl.className = 'hinova-status warn';
+      atualizarFormTipo();
       return;
     }
     const d = data.dados;
@@ -739,18 +866,32 @@ async function buscarVeiculoNaHinova(placa) {
     if (d.telefone && !f.telefone.value)   f.telefone.value  = d.telefone;
     if (d.tipo === 'uber') f.tipo.value = 'uber'; // só confirma Uber quando a Hinova garante — antigo/novo continua decisão manual
 
+    veiculoForm = {
+      plano: d.plano || null,
+      coberturaVidros: d.coberturaVidros || null,
+      codigoFipe: d.codigoFipe || null,
+      anoModelo: d.anoModelo || d.ano || null,
+      tipoFipe: d.tipoFipe || 'cars',
+    };
+
     fipeHint.classList.add('hidden');
     if (d.fipeZerada) {
-      fipeHint.textContent = '⚠️ SGA não tem o valor FIPE cadastrado para esse veículo — preencha manualmente.';
+      fipeHint.textContent = '⚠️ SGA não tem o valor FIPE cadastrado para esse veículo — use "Buscar FIPE do dia" ou preencha manualmente.';
       fipeHint.classList.remove('hidden');
-    } else if (d.fipe && !f.fipe.value) {
+    } else if (d.fipe && (!f.fipe.value || (fipeAuto && parseMoeda(f.fipe.value) === fipeAuto.valor))) {
+      // Substitui também um valor que veio automático de outra placa — nunca o que foi digitado à mão
       f.fipe.value = formatMoeda(d.fipe);
-      fipeHint.textContent = '💡 Valor sugerido pelo SGA — confira antes de salvar.';
+      fipeAuto = { valor: d.fipe, referencia: null, fonte: 'sga' };
+      fipeHint.textContent = '💡 Valor do SGA (sem data de referência) — buscando FIPE do dia…';
       fipeHint.classList.remove('hidden');
     }
 
     statusEl.textContent = `✅ Preenchido automaticamente pelo SGA${d.situacao ? ' (associado ' + d.situacao + ')' : ''}. Confira antes de salvar.`;
     statusEl.className = 'hinova-status ok';
+    atualizarFormTipo();
+
+    // FIPE do dia (tabela oficial) substitui o valor do SGA — mas nunca o que o atendente digitou
+    if (veiculoForm.codigoFipe && tipoEventoForm() === 'colisao') await buscarFipeDoDia(meuSeq);
   } catch (err) {
     if (meuSeq !== hinovaBuscaSeq) return;
     statusEl.textContent = `⚠️ SGA indisponível (${err.message}) — preencha manualmente.`;
@@ -758,15 +899,103 @@ async function buscarVeiculoNaHinova(placa) {
   }
 }
 
-// Ajusta o formulário conforme o tipo de evento (associado × terceiro)
-function atualizarFormTerceiro() {
-  const ehTerceiro = document.getElementById('chkEhTerceiro').checked;
-  document.getElementById('lblTipo').classList.toggle('hidden', ehTerceiro);
-  document.getElementById('lblFipe').classList.toggle('hidden', ehTerceiro);
-  document.getElementById('lblHasTerceiro').classList.toggle('hidden', ehTerceiro);
+// Consulta a tabela FIPE oficial pelo código que veio do SGA.
+// seq: quando chamada pela busca automática, descarta a resposta se a placa já mudou.
+async function buscarFipeDoDia(seq) {
+  const f = document.getElementById('formEvento');
+  const fipeHint = document.getElementById('fipeHinovaHint');
+  const btn = document.getElementById('btnFipeHoje');
+  if (!veiculoForm?.codigoFipe || !veiculoForm?.anoModelo) return;
+
+  const valorAntes = parseMoeda(f.fipe.value);
+  const podeSobrescrever = !f.fipe.value || (fipeAuto && valorAntes === fipeAuto.valor) || seq === undefined;
+
+  btn.disabled = true;
+  btn.textContent = '⏳ Consultando tabela FIPE…';
+  try {
+    const q = new URLSearchParams({ codigo: veiculoForm.codigoFipe, ano: veiculoForm.anoModelo, tipo: veiculoForm.tipoFipe });
+    const r = await api(`/api/fipe-hoje?${q}`);
+    if (seq !== undefined && seq !== hinovaBuscaSeq) return;
+    if (!r.encontrado) {
+      fipeHint.textContent = '⚠️ Esse modelo/ano não foi encontrado na tabela FIPE — confira o valor manualmente.';
+      fipeHint.classList.remove('hidden');
+      return;
+    }
+    if (!podeSobrescrever) {
+      fipeHint.textContent = `💡 FIPE do dia: ${moeda(r.dados.valor)} (tabela de ${r.dados.referencia}). Mantive o valor que você digitou.`;
+      fipeHint.classList.remove('hidden');
+      return;
+    }
+    f.fipe.value = formatMoeda(r.dados.valor);
+    fipeAuto = { valor: r.dados.valor, referencia: r.dados.referencia, fonte: 'fipe' };
+    fipeHint.textContent = `✅ FIPE do dia: tabela oficial de ${r.dados.referencia} (${r.dados.modelo || ''} ${r.dados.anoNome || ''}).`;
+    fipeHint.classList.remove('hidden');
+  } catch (err) {
+    if (seq !== undefined && seq !== hinovaBuscaSeq) return;
+    fipeHint.textContent = `⚠️ Tabela FIPE indisponível agora (${err.message}). ${f.fipe.value ? 'Mantido o valor do SGA.' : 'Preencha manualmente.'}`;
+    fipeHint.classList.remove('hidden');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🔄 Buscar FIPE do dia';
+  }
+}
+
+// Ajusta o formulário conforme o tipo de evento (colisão × terceiro × vidros)
+function atualizarFormTipo() {
+  const tipoEv = tipoEventoForm();
+  const ehTerceiro = tipoEv === 'terceiro';
+  const ehVidro = tipoEv === 'vidro';
+  const coberturaSga = veiculoForm?.coberturaVidros;
+  const coberturaConhecida = !!PECAS_POR_COBERTURA[coberturaSga];
+
+  document.getElementById('lblTipo').classList.toggle('hidden', ehTerceiro || ehVidro);
+  // Tipo de associado só é obrigatório em colisão (campo escondido não pode bloquear o salvar)
+  document.getElementById('formEvento').tipo.required = !(ehTerceiro || ehVidro);
+  document.getElementById('lblFipe').classList.toggle('hidden', ehTerceiro || ehVidro);
+  document.getElementById('lblHasTerceiro').classList.toggle('hidden', ehTerceiro || ehVidro);
   document.getElementById('lblAssociadoEnvolvido').classList.toggle('hidden', !ehTerceiro);
+  document.getElementById('lblPecaVidro').classList.toggle('hidden', !ehVidro);
+  document.getElementById('lblValorVidro').classList.toggle('hidden', !ehVidro);
+  document.getElementById('lblCoberturaManual').classList.toggle('hidden', !ehVidro || coberturaConhecida);
+  document.getElementById('btnFipeHoje').classList.toggle('hidden', !veiculoForm?.codigoFipe || ehTerceiro || ehVidro);
   document.getElementById('lblAssociadoTxt').textContent = ehTerceiro
     ? 'Nome do terceiro (dono do carro)' : 'Nome do associado';
+
+  const planoBox = document.getElementById('planoBox');
+  if (!ehTerceiro && veiculoForm?.plano) {
+    const cobTxt = coberturaConhecida ? TEXTO_COBERTURA[coberturaSga] : 'não confirmada pelo SGA';
+    planoBox.innerHTML = `📋 Plano <strong>${veiculoForm.plano}</strong> · Vidros: <strong>${cobTxt}</strong>`;
+    planoBox.classList.remove('hidden');
+  } else {
+    planoBox.classList.add('hidden');
+  }
+  atualizarResumoVidro();
+}
+
+function coberturaEfetivaForm() {
+  const f = document.getElementById('formEvento');
+  const sga = veiculoForm?.coberturaVidros;
+  return PECAS_POR_COBERTURA[sga] ? sga : (f.coberturaManual.value || null);
+}
+
+// Prévia ao vivo dentro do formulário: coberto?, limite de 12 meses e divisão 70/30
+function atualizarResumoVidro() {
+  const f = document.getElementById('formEvento');
+  const box = document.getElementById('vidroResumo');
+  if (tipoEventoForm() !== 'vidro') { box.classList.add('hidden'); return; }
+
+  const coberto = pecaCoberta(coberturaEfetivaForm(), f.pecaVidro.value);
+  const recente = f.placa.value ? trocaVidroRecente(f.placa.value, f.data.value, editingEvtId) : null;
+  const div = divisaoVidro(parseMoeda(f.valorVidro.value));
+  const fmt = d => d.toLocaleDateString('pt-BR');
+
+  let html;
+  if (coberto === null) html = `<span class="warn">⚠️ Cobertura de vidros não confirmada — escolha acima conferindo no SGA.</span>`;
+  else if (!coberto) html = `<span class="err">❌ ${f.pecaVidro.value} não é coberto por esse plano. A mensagem ao associado vai oferecer a migração de plano.</span>`;
+  else if (recente) html = `<span class="err">❌ Já houve troca coberta em ${fmt(recente.ultima)} (evento ${recente.evt.numero}). Próxima troca a partir de ${fmt(recente.proxima)}.</span>`;
+  else html = `<span class="ok">✅ ${f.pecaVidro.value} coberto.</span>${div.total ? ` Bravax paga <strong>${moeda(div.bravax)}</strong> (70%) · associado paga <strong>${moeda(div.associado)}</strong> (30%).` : ' Informe o valor total para ver a divisão 70/30.'}`;
+  box.innerHTML = html;
+  box.classList.remove('hidden');
 }
 
 // Sugestões de associados para o campo "envolvido com"
@@ -781,8 +1010,10 @@ function openNovoEvento() {
   const f = document.getElementById('formEvento');
   f.reset();
   f.data.value = new Date().toISOString().split('T')[0];
+  veiculoForm = null;
+  fipeAuto = null;
   popularListaAssociados();
-  atualizarFormTerceiro();
+  atualizarFormTipo();
   atualizarLinkFipe();
   hinovaBuscaSeq++; clearTimeout(hinovaBuscaTimer); // invalida busca pendente do modal anterior
   document.getElementById('hinovaStatus').classList.add('hidden');
@@ -802,15 +1033,26 @@ function openEditEvento(eventoId) {
   f.cor.value         = evt.cor || '';
   f.associado.value   = evt.associado || '';
   f.telefone.value    = evt.telefone || '';
-  f.tipo.value        = evt.tipo || 'novo';
+  f.tipo.value        = evt.tipo || '';
   f.fipe.value        = evt.fipe ? formatMoeda(evt.fipe) : '';
   f.data.value        = evt.data || '';
   f.descricao.value   = evt.descricao || '';
   f.hasTerceiro.checked = evt.hasTerceiro || false;
-  f.ehTerceiro.checked  = evt.ehTerceiro || false;
   f.associadoEnvolvido.value = evt.associadoEnvolvido || '';
+  const cat = categoriaDoEvento(evt);
+  f.querySelector(`input[name="tipoEvento"][value="${cat}"]`).checked = true;
+  f.pecaVidro.value = evt.pecaVidro || 'Para-brisa';
+  f.valorVidro.value = evt.valorVidro ? formatMoeda(evt.valorVidro) : '';
+  // Reaproveita o que já foi confirmado no SGA quando o evento foi criado
+  veiculoForm = (evt.planoVeiculo || evt.coberturaVidros || evt.codigoFipe) ? {
+    plano: evt.planoVeiculo || null,
+    coberturaVidros: evt.coberturaVidrosFonte === 'sga' ? evt.coberturaVidros : null,
+    codigoFipe: evt.codigoFipe || null, anoModelo: evt.anoModelo || evt.ano || null, tipoFipe: evt.tipoFipe || 'cars',
+  } : null;
+  f.coberturaManual.value = evt.coberturaVidrosFonte === 'manual' ? (evt.coberturaVidros || '') : '';
+  fipeAuto = evt.fipe ? { valor: evt.fipe, referencia: evt.fipeReferencia || null, fonte: evt.fipeFonte || 'manual' } : null;
   popularListaAssociados();
-  atualizarFormTerceiro();
+  atualizarFormTipo();
   atualizarLinkFipe();
   hinovaBuscaSeq++; clearTimeout(hinovaBuscaTimer); // invalida busca pendente do modal anterior
   document.getElementById('hinovaStatus').classList.add('hidden');
@@ -900,6 +1142,7 @@ function gerarMsgWA(evt, forn, pecaIds) {
 
 function setupForms() {
   attachCurrencyMask(document.getElementById('formEvento').fipe);
+  attachCurrencyMask(document.getElementById('formEvento').valorVidro);
   attachCurrencyMask(document.getElementById('formAddCotacao').valor);
   attachCurrencyMask(document.getElementById('formAddCotacao').frete);
 
@@ -907,7 +1150,14 @@ function setupForms() {
   document.getElementById('formEvento').addEventListener('submit', e => {
     e.preventDefault();
     const f = e.target;
-    const ehTerceiro = f.ehTerceiro.checked;
+    const tipoEv = tipoEventoForm();
+    const ehTerceiro = tipoEv === 'terceiro';
+    const ehVidro = tipoEv === 'vidro';
+    const fipeValor = ehTerceiro || ehVidro ? 0 : parseMoeda(f.fipe.value);
+    // Data de referência só vale se o valor salvo for exatamente o que veio da tabela/SGA
+    const fipeConfere = fipeAuto && fipeValor === fipeAuto.valor;
+    const coberturaSga = PECAS_POR_COBERTURA[veiculoForm?.coberturaVidros] ? veiculoForm.coberturaVidros : null;
+    const cobertura = ehVidro ? (coberturaSga || f.coberturaManual.value || null) : null;
     const dados = {
       placa:       f.placa.value.trim().toUpperCase(),
       veiculo:     f.veiculo.value.trim(),
@@ -916,13 +1166,28 @@ function setupForms() {
       associado:   f.associado.value.trim(),
       telefone:    f.telefone.value.trim(),
       tipo:        f.tipo.value,
-      fipe:        ehTerceiro ? 0 : parseMoeda(f.fipe.value),
+      fipe:        fipeValor,
+      fipeReferencia: fipeConfere ? (fipeAuto.referencia || '') : '',
+      fipeFonte:   fipeValor ? (fipeConfere ? fipeAuto.fonte : 'manual') : '',
       data:        f.data.value,
       descricao:   f.descricao.value.trim(),
-      hasTerceiro: f.hasTerceiro.checked,
+      hasTerceiro: ehVidro ? false : f.hasTerceiro.checked,
       ehTerceiro,
       associadoEnvolvido: ehTerceiro ? f.associadoEnvolvido.value.trim() : '',
+      categoriaEvento: ehVidro ? 'vidro' : 'colisao',
+      planoVeiculo: veiculoForm?.plano || '',
+      codigoFipe:  veiculoForm?.codigoFipe || '',
+      anoModelo:   veiculoForm?.anoModelo || '',
+      tipoFipe:    veiculoForm?.tipoFipe || '',
+      pecaVidro:   ehVidro ? f.pecaVidro.value : '',
+      valorVidro:  ehVidro ? parseMoeda(f.valorVidro.value) : 0,
+      coberturaVidros: cobertura || '',
+      coberturaVidrosFonte: ehVidro && cobertura ? (coberturaSga ? 'sga' : 'manual') : '',
+      // coberto: true/false quando dá para afirmar; null quando a cobertura não foi confirmada
+      coberto:     ehVidro ? pecaCoberta(cobertura, f.pecaVidro.value) : null,
     };
+    dados.bloqueadoLimite = ehVidro && dados.coberto === true
+      && !!trocaVidroRecente(dados.placa, dados.data, editingEvtId);
     const dupEvt = state.eventos.find(e => e.placa === dados.placa && e.id !== editingEvtId && !e.encerrado);
     if (dupEvt && !confirm(`Já existe um evento aberto com a placa ${dados.placa} (${dupEvt.associado}).\n\nDeseja continuar mesmo assim?`)) {
       return;
@@ -933,7 +1198,9 @@ function setupForms() {
       const num = String(state.eventos.length + 1).padStart(3, '0');
       const novo = {
         id: uid(), numero: `EV-${new Date().getFullYear()}-${num}`,
-        encerrado: false, pecas: [],
+        encerrado: false,
+        // Evento de vidro já nasce com a peça no comparativo, pronto para cotar com as vidraçarias
+        pecas: ehVidro ? [{ id: uid(), nome: dados.pecaVidro, qtd: 1, tipo: 'Original', obs: '', cotacoes: [] }] : [],
         checklist: { comunicou0800: false, boRealizado: false, cotaPaga: false, termoAssociado: false, termoTerceiro: false },
         ...dados,
       };
@@ -992,8 +1259,12 @@ function setupForms() {
     document.getElementById('camposCotacao').style.display = e.target.checked ? 'contents' : 'none';
   });
 
-  document.getElementById('chkEhTerceiro').addEventListener('change', () => { atualizarFormTerceiro(); agendarBuscaHinova(); });
-  document.getElementById('formEvento').placa.addEventListener('input', () => { atualizarLinkFipe(); agendarBuscaHinova(); });
+  const fEvt = document.getElementById('formEvento');
+  fEvt.querySelectorAll('input[name="tipoEvento"]').forEach(r => r.addEventListener('change', () => { atualizarFormTipo(); agendarBuscaHinova(); }));
+  fEvt.placa.addEventListener('input', () => { veiculoForm = null; atualizarLinkFipe(); atualizarFormTipo(); agendarBuscaHinova(); });
+  ['pecaVidro', 'coberturaManual', 'data'].forEach(n => fEvt[n].addEventListener('change', atualizarResumoVidro));
+  fEvt.valorVidro.addEventListener('input', atualizarResumoVidro);
+  document.getElementById('btnFipeHoje').addEventListener('click', () => buscarFipeDoDia());
 
   // Fornecedor
   document.getElementById('formFornecedor').addEventListener('submit', e => {
@@ -1325,7 +1596,11 @@ function gerarRelatorioGeral() {
 
   const linhas = ativos.map(evt => {
     const st = computeStatus(evt);
-    const cota = evt.ehTerceiro ? null : calcCota(evt);
+    const ehVidro = categoriaDoEvento(evt) === 'vidro';
+    // Em evento de vidro coberto, a "cota" é a participação de 30% do associado
+    const cota = evt.ehTerceiro ? null
+      : ehVidro ? (evt.coberto && !evt.bloqueadoLimite && evt.valorVidro ? divisaoVidro(evt.valorVidro).associado : null)
+      : calcCota(evt);
     const cotaPagaOk = evt.checklist?.cotaPaga;
     if (cota !== null && !cotaPagaOk) totalCotaPendente += cota;
     const dias = diasSemAtualizacao(evt);
@@ -1336,7 +1611,7 @@ function gerarRelatorioGeral() {
       <td>${evt.ehTerceiro ? '🚙 ' : ''}${evt.associado}</td>
       <td>${descreveVeiculo(evt) || '—'}</td>
       <td>${st.label}</td>
-      <td>${evt.ehTerceiro ? '—' : moeda(cota || 0)}</td>
+      <td>${cota === null ? '—' : moeda(cota) + (ehVidro ? ' (vidro 30%)' : '')}</td>
       <td>${evt.pecas?.length || 0}</td>
       <td>${dias !== null ? dias + 'd' : '—'}</td>
     </tr>`;
@@ -1365,7 +1640,7 @@ th{background:#f3f4f6;font-size:11px;text-transform:uppercase}
   <div>Parados (${DIAS_PARADO}+ dias)<strong>${parados}</strong></div>
   <div>Cota pendente<strong>${moeda(totalCotaPendente)}</strong></div>
 </div>
-<table><thead><tr><th>Placa</th><th>Associado</th><th>Veículo</th><th>Status</th><th>Cota</th><th>Peças</th><th>Últ. atividade</th></tr></thead>
+<table><thead><tr><th>Placa</th><th>Associado</th><th>Veículo</th><th>Status</th><th>Cota / Particip.</th><th>Peças</th><th>Últ. atividade</th></tr></thead>
 <tbody>${linhas || '<tr><td colspan="7">Nenhum evento aberto</td></tr>'}</tbody></table>
 <div style="margin-top:20px;font-size:11px;color:#999">Bravax Protege · ${hoje}</div>
 </body></html>`;
@@ -1513,21 +1788,22 @@ function setupListeners() {
   document.getElementById('btnBackupAgora')?.addEventListener('click', baixarBackupAgora);
 
   // Templates de mensagem
+  // chave do modelo → id do campo no modal "Mensagens"
+  const TPL_CAMPOS = {
+    cotacao: 'tplCotacao', atualizacao: 'tplAtualizacao',
+    vidroCoberto: 'tplVidroCoberto', vidroSemCobertura: 'tplVidroSemCobertura', vidroLimite: 'tplVidroLimite',
+  };
   document.getElementById('btnTemplates')?.addEventListener('click', () => {
     const t = loadTemplates();
-    document.getElementById('tplCotacao').value = t.cotacao;
-    document.getElementById('tplAtualizacao').value = t.atualizacao;
+    for (const [k, id] of Object.entries(TPL_CAMPOS)) document.getElementById(id).value = t[k];
     document.getElementById('dlgTemplates').showModal();
   });
   document.getElementById('btnRestaurarTpl')?.addEventListener('click', () => {
-    document.getElementById('tplCotacao').value = DEFAULT_TPL.cotacao;
-    document.getElementById('tplAtualizacao').value = DEFAULT_TPL.atualizacao;
+    for (const [k, id] of Object.entries(TPL_CAMPOS)) document.getElementById(id).value = DEFAULT_TPL[k];
   });
   document.getElementById('btnSalvarTpl')?.addEventListener('click', () => {
-    templates = {
-      cotacao: document.getElementById('tplCotacao').value || DEFAULT_TPL.cotacao,
-      atualizacao: document.getElementById('tplAtualizacao').value || DEFAULT_TPL.atualizacao,
-    };
+    templates = Object.fromEntries(Object.entries(TPL_CAMPOS)
+      .map(([k, id]) => [k, document.getElementById(id).value || DEFAULT_TPL[k]]));
     saveTemplates(templates);
     document.getElementById('dlgTemplates').close();
   });

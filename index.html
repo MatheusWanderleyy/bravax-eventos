@@ -50,6 +50,7 @@
       <button class="chip" data-f="abertos" onclick="setFiltro('abertos')">Abertos</button>
       <button class="chip" data-f="parados" onclick="setFiltro('parados')">⏰ Parados</button>
       <button class="chip" data-f="terceiros" onclick="setFiltro('terceiros')">🚙 Terceiros</button>
+      <button class="chip" data-f="vidros" onclick="setFiltro('vidros')">🪟 Vidros</button>
     </div>
 
     <div id="eventList" class="event-list"></div>
@@ -116,14 +117,16 @@
   </div>
   <form id="formEvento">
     <div class="form-grid">
-      <label class="full check-label toggle-terceiro">
-        <input type="checkbox" name="ehTerceiro" id="chkEhTerceiro" />
-        🚙 Este carro é de um terceiro (não associado)
-      </label>
+      <div class="full tipo-evento-seg" role="radiogroup" aria-label="Tipo de evento">
+        <label><input type="radio" name="tipoEvento" value="colisao" checked /> 💥 Colisão</label>
+        <label><input type="radio" name="tipoEvento" value="terceiro" /> 🚙 Carro de terceiro</label>
+        <label><input type="radio" name="tipoEvento" value="vidro" /> 🪟 Vidros / para-brisa</label>
+      </div>
       <label>Placa<input name="placa" required placeholder="QXX0A00" autocomplete="off" />
         <a id="linkFipeForm" class="link-fipe hidden" href="https://placafipe.com.br/" target="_blank" onclick="copiarPlacaFipe();event.stopPropagation()">🔎 Consultar no PlacaFipe</a>
         <span id="hinovaStatus" class="hinova-status hidden"></span>
       </label>
+      <div id="planoBox" class="full plano-box hidden"></div>
       <label>Veículo<input name="veiculo" required placeholder="Onix Joy" /></label>
       <label>Ano<input name="ano" inputmode="numeric" maxlength="4" placeholder="2023" /></label>
       <label>Cor (opcional)<input name="cor" placeholder="Prata" /></label>
@@ -134,7 +137,8 @@
         <datalist id="listaAssociados"></datalist>
       </label>
       <label id="lblTipo">Tipo de associado
-        <select name="tipo">
+        <select name="tipo" required>
+          <option value="" disabled selected>Selecione…</option>
           <option value="uber">Uber — cota 7%</option>
           <option value="antigo">Associado antigo — cota 6%</option>
           <option value="novo">Associado novo — cota 5%</option>
@@ -142,7 +146,29 @@
       </label>
       <label id="lblFipe">Valor FIPE (R$)<input name="fipe" inputmode="decimal" placeholder="50000" />
         <span id="fipeHinovaHint" class="fipe-hinova-hint hidden">💡 Valor sugerido pela Hinova — confira antes de salvar</span>
+        <button type="button" id="btnFipeHoje" class="btn-link hidden">🔄 Buscar FIPE do dia</button>
       </label>
+      <label id="lblPecaVidro" class="hidden">Peça de vidro
+        <select name="pecaVidro">
+          <option value="Para-brisa">Para-brisa</option>
+          <option value="Vidro lateral">Vidro lateral</option>
+          <option value="Vigia (vidro traseiro)">Vigia (vidro traseiro)</option>
+          <option value="Farol">Farol</option>
+          <option value="Lanterna">Lanterna</option>
+        </select>
+      </label>
+      <label id="lblValorVidro" class="hidden">Valor total cotado (R$)
+        <input name="valorVidro" inputmode="decimal" placeholder="1.200" />
+      </label>
+      <label id="lblCoberturaManual" class="full hidden">Cobertura de vidros (não confirmada pelo SGA — escolha conferindo no sistema)
+        <select name="coberturaManual">
+          <option value="">— Conferir no SGA —</option>
+          <option value="nenhuma">Sem cobertura de vidros (plano Ouro)</option>
+          <option value="parabrisa">Só para-brisa (plano Diamante)</option>
+          <option value="todos">Todos os vidros, faróis e lanternas (plano Platinum)</option>
+        </select>
+      </label>
+      <div id="vidroResumo" class="full vidro-resumo hidden" aria-live="polite"></div>
       <label>Data da ocorrência<input name="data" type="date" /></label>
       <label class="full">Descrição
         <textarea name="descricao" rows="2" placeholder="Resumo da ocorrência (opcional)"></textarea>
@@ -335,6 +361,16 @@
       <textarea id="tplAtualizacao" rows="8"></textarea>
     </label>
     <p class="tpl-help">Variáveis disponíveis: {{veiculo}} {{placa}} {{associado}} {{numero}} {{texto}} {{autor}} {{quando}} {{link}}</p>
+    <label class="tpl-label">Vidros — associado COM cobertura
+      <textarea id="tplVidroCoberto" rows="8"></textarea>
+    </label>
+    <label class="tpl-label">Vidros — associado SEM cobertura no plano
+      <textarea id="tplVidroSemCobertura" rows="8"></textarea>
+    </label>
+    <label class="tpl-label">Vidros — limite de 1 troca a cada 12 meses
+      <textarea id="tplVidroLimite" rows="8"></textarea>
+    </label>
+    <p class="tpl-help">Variáveis de vidros: {{associado}} {{veiculo}} {{placa}} {{plano}} {{peca}} {{cobertura}} {{valor_total}} {{valor_bravax}} {{valor_associado}} {{ultima_troca}} {{proxima_troca}}</p>
   </div>
   <div class="modal-footer">
     <button class="btn-ghost" id="btnRestaurarTpl">Restaurar padrão</button>

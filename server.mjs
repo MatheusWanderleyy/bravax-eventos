@@ -112,6 +112,75 @@ async function hinovaBuscarVeiculo(placa) {
   return item || null;
 }
 
+// Produtos contratados do veículo (é aqui que aparece a cobertura de vidros).
+// Devolve null quando não deu para consultar — "não sei" é diferente de "não tem".
+async function hinovaProdutosVeiculo(placa) {
+  try {
+    let token = await hinovaAutenticar();
+    const url = `${HINOVA_BASE_URL}/produto-vinculado-veiculo/listar/${normPlaca(placa)}`;
+    let resp = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    if (resp.status === 401) {
+      hinovaToken = null;
+      token = await hinovaAutenticar();
+      resp = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    }
+    if (resp.status === 406) return []; // Hinova responde 406 quando o veículo não tem produtos
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    return Array.isArray(data) ? data : (Object.values(data || {}).find(Array.isArray) || []);
+  } catch {
+    return null;
+  }
+}
+
+// Produtos 102/103 = só para-brisa (Diamante); 113 = todos os vidros, faróis e lanternas (Platinum).
+// Classifica pela descrição (não pelo código) para continuar funcionando se a Hinova recadastrar o produto.
+function coberturaVidrosDe(produtos) {
+  if (!produtos) return null;
+  const descs = produtos
+    .filter(p => String(p.situacao || "ATIVO").toUpperCase() === "ATIVO")
+    .map(p => String(p.descricao || p.decricao_produto || "").toUpperCase());
+  if (descs.some(d => /TODOS OS VIDROS/.test(d))) return "todos";
+  if (descs.some(d => /PARA-?\s?BRISA/.test(d))) return "parabrisa";
+  if (descs.some(d => /VIDRO/.test(d))) return "verificar"; // produto de vidro desconhecido — atendente confere
+  return "nenhuma";
+}
+
+function nomePlano(tipo) {
+  const t = String(tipo || "").toUpperCase();
+  for (const p of ["PLATINUM", "DIAMANTE", "OURO", "PESADOS"]) if (t.includes(p)) return tituloCase(p);
+  return t ? tituloCase(t) : null;
+}
+
+// ─── FIPE DO DIA — tabela oficial via API pública (fipe.parallelum.com.br) ─
+const FIPE_API = "https://fipe.parallelum.com.br/api/v2";
+const fipeCache = new Map(); // a tabela FIPE muda 1x por mês — 6h de cache evita estourar o limite gratuito
+
+async function fipeHoje(codigo, ano, tipoFipe = "cars") {
+  const chave = `${tipoFipe}|${codigo}|${ano}`;
+  const emCache = fipeCache.get(chave);
+  if (emCache && Date.now() - emCache.t < 6 * 3600 * 1000) return emCache.dados;
+
+  const headers = process.env.FIPE_API_TOKEN ? { "X-Subscription-Token": process.env.FIPE_API_TOKEN } : {};
+  const base = `${FIPE_API}/${tipoFipe}/${encodeURIComponent(codigo)}/years`;
+  const rAnos = await fetch(base, { headers });
+  if (!rAnos.ok) throw new Error(`tabela FIPE respondeu HTTP ${rAnos.status}`);
+  const anos = await rAnos.json();
+  // O código de combustível da FIPE é diferente do da Hinova — escolhe pelo ano do modelo
+  const opcao = Array.isArray(anos) && anos.find(a => String(a.code).startsWith(`${ano}-`));
+  if (!opcao) return null;
+
+  const r = await fetch(`${base}/${opcao.code}`, { headers });
+  if (!r.ok) throw new Error(`tabela FIPE respondeu HTTP ${r.status}`);
+  const d = await r.json();
+  const valor = Number(String(d.price || "").replace(/[^\d,]/g, "").replace(",", "."));
+  if (!valor) return null;
+
+  const dados = { valor, referencia: d.referenceMonth || null, modelo: d.model || null, anoNome: opcao.name };
+  fipeCache.set(chave, { t: Date.now(), dados });
+  return dados;
+}
+
 // Traduz o payload cru da Hinova para os campos do formulário local.
 // Não decide tipo "antigo/novo" (não é dado da Hinova) — só marca "uber" quando a categoria confirma.
 // "cor" não vem como texto (só codigo_cor, sem tabela de tradução) — fica de fora, preenchimento manual.
@@ -130,6 +199,10 @@ function mapearVeiculoHinova(v) {
     fipe:       Number.isFinite(fipe) && fipe > 0 ? fipe : null,
     fipeZerada: Number.isFinite(fipe) && fipe === 0,
     situacao:   v.descricao_situacao ? tituloCase(v.descricao_situacao) : null,
+    plano:      nomePlano(v.tipo),
+    codigoFipe: v.codigo_fipe || null,
+    anoModelo:  v.ano_modelo || null,
+    tipoFipe:   /MOTO/i.test(v.tipo || "") ? "motorcycles" : (/PESAD/i.test(v.tipo || "") ? "trucks" : "cars"),
   };
 }
 
@@ -294,9 +367,27 @@ async function handleApi(request, response, url) {
     try {
       const bruto = await hinovaBuscarVeiculo(placa);
       if (!bruto) return send(200, { encontrado: false });
-      return send(200, { encontrado: true, dados: mapearVeiculoHinova(bruto) });
+      const dados = mapearVeiculoHinova(bruto);
+      dados.coberturaVidros = coberturaVidrosDe(await hinovaProdutosVeiculo(placa));
+      return send(200, { encontrado: true, dados });
     } catch (err) {
       return send(502, { error: `Hinova indisponível: ${err.message}` });
+    }
+  }
+
+  // FIPE do dia pela tabela oficial — SOMENTE LEITURA, não grava nada.
+  if (url.pathname === "/api/fipe-hoje" && request.method === "GET") {
+    if (!getSession(request)) return send(401, { error: "Não autorizado" });
+    const codigo = url.searchParams.get("codigo") || "";
+    const ano = url.searchParams.get("ano") || "";
+    const tipoFipe = ["cars", "motorcycles", "trucks"].includes(url.searchParams.get("tipo")) ? url.searchParams.get("tipo") : "cars";
+    if (!/^\d{6}-\d$/.test(codigo) || !/^\d{4}$/.test(ano)) return send(400, { error: "Código FIPE ou ano inválido" });
+    try {
+      const dados = await fipeHoje(codigo, ano, tipoFipe);
+      if (!dados) return send(200, { encontrado: false });
+      return send(200, { encontrado: true, dados });
+    } catch (err) {
+      return send(502, { error: `Tabela FIPE indisponível: ${err.message}` });
     }
   }
 
