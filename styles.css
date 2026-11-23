@@ -1337,3 +1337,93 @@ dialog::backdrop { background: rgba(0,0,0,.35); backdrop-filter: blur(2px); }
   .form-grid { grid-template-columns: 1fr; }
   .foto-cotacao { grid-template-columns: 1fr 1fr; }
 }
+
+/* ══════════════════════════════════════════════
+   REMOÇÃO · OFICINAS · PEDIDO DE COTAÇÃO · AVISOS
+══════════════════════════════════════════════ */
+
+.remocao-card {
+  background: var(--info-bg);
+  border: 1px solid var(--info-border);
+  border-radius: var(--radius);
+  padding: 14px 18px;
+  display: flex; flex-direction: column; gap: 12px;
+}
+.remocao-card .cota-label { color: var(--info-fg); }
+
+.remocao-rota { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.remocao-rota > div {
+  background: white;
+  border: 1px solid var(--info-border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex; flex-direction: column; gap: 4px;
+  min-width: 0;
+}
+.remocao-rota span { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.remocao-rota strong { font-size: 14px; line-height: 1.4; overflow-wrap: anywhere; }
+.remocao-rota em { font-size: 12px; font-style: normal; color: var(--ink); overflow-wrap: anywhere; }
+.remocao-rota small { font-size: 11px; color: var(--muted); }
+
+.remocao-pend { border-radius: 8px; padding: 10px 12px; font-size: 13px; line-height: 1.5; }
+.remocao-pend p { margin: 4px 0 10px; }
+.remocao-pend.warn { background: var(--warn-bg); border: 1px solid var(--warn-border); color: var(--warn-fg); }
+.remocao-pend.ok   { background: var(--ok-bg);   border: 1px solid var(--ok-border);   color: var(--ok-fg); }
+.remocao-pend.err  { background: var(--err-bg);  border: 1px solid var(--err-border);  color: var(--red); font-weight: 600; }
+
+.remocao-acoes { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.remocao-hist { font-size: 12px; color: var(--muted); }
+
+.btn-wa-save, .btn-ghost-sm { transition: background .15s, opacity .15s; }
+.btn-wa-save:disabled, .btn-ghost-sm:disabled { opacity: .45; cursor: not-allowed; }
+.btn-wa-save:disabled:hover { background: #25d366; }
+
+/* Pedido de cotação: escolher fornecedor + mensagem editável */
+.wa-forn { display: flex; flex-direction: column; gap: 5px; font-size: 12px; font-weight: 600; color: var(--muted); }
+.wa-forn select {
+  border: 1px solid var(--border); border-radius: 7px;
+  padding: 8px 10px; font-size: 13px; color: var(--ink); background: white;
+}
+.wa-forn select:focus { outline: 2px solid var(--red); outline-offset: -1px; }
+.wa-preview-label { display: block; padding: 12px 22px 0; font-size: 12px; font-weight: 600; color: var(--muted); }
+textarea.wa-preview {
+  display: block;
+  width: calc(100% - 44px);
+  min-height: 240px;
+  max-height: none;
+  resize: vertical;
+  font: inherit; font-size: 13px;
+  color: var(--ink);
+  margin-top: 6px;
+}
+textarea.wa-preview:focus { outline: 2px solid #25d366; outline-offset: -1px; }
+
+/* Cadastro de oficinas e 0800 */
+.forn-add-topo { border-top: none; }
+.forn-lista-titulo {
+  padding: 12px 22px 0;
+  border-top: 1px solid var(--border);
+  font-size: 13px; font-weight: 700; color: var(--muted);
+}
+.forn-vazio { font-size: 13px; color: var(--muted); padding: 8px 0; }
+
+/* Aviso rápido de sucesso/erro */
+.toast {
+  position: fixed; left: 50%; bottom: 24px;
+  transform: translate(-50%, 12px);
+  opacity: 0; pointer-events: none;
+  max-width: min(440px, calc(100vw - 32px));
+  padding: 10px 16px; border-radius: 10px;
+  font-size: 13px; font-weight: 600;
+  box-shadow: var(--shadow);
+  z-index: 500;
+  transition: opacity .2s, transform .2s;
+}
+.toast.show { opacity: 1; transform: translate(-50%, 0); }
+.toast-ok  { background: var(--ok-bg);  color: var(--ok-fg); border: 1px solid var(--ok-border); }
+.toast-err { background: var(--err-bg); color: var(--red);   border: 1px solid var(--err-border); }
+
+@media (max-width: 768px) {
+  .remocao-rota { grid-template-columns: 1fr; }
+  .remocao-acoes > button { flex: 1 1 100%; min-height: 44px; }
+}

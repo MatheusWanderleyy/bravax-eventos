@@ -1,4 +1,4 @@
-import { createReadStream, existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, unlinkSync } from "node:fs";
+import { createReadStream, existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, unlinkSync, copyFileSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,6 +17,22 @@ const BACKUP_DIR = join(DATA_DIR, "backups");
 mkdirSync(DATA_DIR, { recursive: true });
 mkdirSync(FOTOS_DIR, { recursive: true });
 mkdirSync(BACKUP_DIR, { recursive: true });
+
+// Cópia de segurança a cada inicialização (deploy ou reinício), ANTES de qualquer
+// gravação do código novo — permite voltar exatamente ao ponto anterior ao deploy.
+// Mantém as 10 últimas; o backup diário ("dados-...") segue à parte.
+let backupInicializacao = null;
+try {
+  if (existsSync(DATA_FILE)) {
+    backupInicializacao = `boot-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+    copyFileSync(DATA_FILE, join(BACKUP_DIR, backupInicializacao));
+    const boots = readdirSync(BACKUP_DIR).filter(f => f.startsWith("boot-")).sort();
+    while (boots.length > 10) unlinkSync(join(BACKUP_DIR, boots.shift()));
+  }
+} catch (e) {
+  backupInicializacao = null;
+  console.error("Falha no backup de inicialização:", e.message);
+}
 
 let db = { operadores: [], sessions: {}, state: { fornecedores: [], eventos: [] }, rev: 0 };
 try { db = { ...db, ...JSON.parse(readFileSync(DATA_FILE, "utf8")) }; } catch {}
@@ -184,6 +200,17 @@ async function fipeHoje(codigo, ano, tipoFipe = "cars") {
 // Traduz o payload cru da Hinova para os campos do formulário local.
 // Não decide tipo "antigo/novo" (não é dado da Hinova) — só marca "uber" quando a categoria confirma.
 // "cor" não vem como texto (só codigo_cor, sem tabela de tradução) — fica de fora, preenchimento manual.
+// Endereço do associado em uma linha, pronto para a mensagem de remoção.
+// Só monta quando há logradouro — endereço pela metade é pior que nenhum.
+function montarEnderecoHinova(v) {
+  if (!String(v.logradouro || "").trim()) return null;
+  const rua = [tituloCase(v.logradouro), String(v.numero || "").trim()].filter(Boolean).join(", ");
+  const linha1 = [rua, v.complemento ? tituloCase(v.complemento) : ""].filter(Boolean).join(" — ");
+  const cidade = v.cidade ? `${tituloCase(v.cidade)}${v.estado ? "/" + String(v.estado).toUpperCase() : ""}` : "";
+  const local = [v.bairro ? tituloCase(v.bairro) : "", cidade].filter(Boolean).join(", ");
+  return [linha1, local, v.cep ? `CEP ${v.cep}` : ""].filter(Boolean).join(" — ");
+}
+
 function mapearVeiculoHinova(v) {
   const categoria = String(v.categoria || "").toUpperCase();
   const fipe = Number(v.valor_fipe);
@@ -191,7 +218,10 @@ function mapearVeiculoHinova(v) {
     ? `(${v.ddd_celular || v.ddd || ""}) ${v.telefone_celular}`
     : (v.telefone ? `(${v.ddd || ""}) ${v.telefone}` : null);
   return {
-    veiculo:    v.modelo ? tituloCase(v.modelo) : null,
+    // Marca junto do modelo: fornecedor de peça precisa dela para cotar certo
+    veiculo:    v.modelo ? tituloCase([v.marca, v.modelo].filter(Boolean).join(" ")) : null,
+    chassi:     v.chassi ? String(v.chassi).toUpperCase().trim() : null,
+    endereco:   montarEnderecoHinova(v),
     ano:        v.ano_modelo || v.ano_fabricacao || null,
     associado:  v.nome ? tituloCase(v.nome) : null,
     telefone,
@@ -233,6 +263,7 @@ async function handleApi(request, response, url) {
       naNuvem: !!process.env.RAILWAY_ENVIRONMENT,
       eventos: db.state?.eventos?.length || 0,
       rev: db.rev,
+      backupInicializacao, // só o nome do arquivo (data/hora), nunca o conteúdo
     });
   }
 

@@ -51,12 +51,14 @@
       <button class="chip" data-f="parados" onclick="setFiltro('parados')">⏰ Parados</button>
       <button class="chip" data-f="terceiros" onclick="setFiltro('terceiros')">🚙 Terceiros</button>
       <button class="chip" data-f="vidros" onclick="setFiltro('vidros')">🪟 Vidros</button>
+      <button class="chip" data-f="remocoes" onclick="setFiltro('remocoes')">🛻 Remoções</button>
     </div>
 
     <div id="eventList" class="event-list"></div>
 
     <div class="left-footer">
       <button class="footer-btn" id="btnFornecedores">👥 Fornecedores</button>
+      <button class="footer-btn" id="btnOficinas">🔧 Oficinas e 0800</button>
       <button class="footer-btn" id="btnOperadores">🔑 Operadores</button>
       <button class="footer-btn" id="btnConfigIA"><span id="aiDot">○</span> Config. IA</button>
       <button class="footer-btn" id="btnRelatorioGeral">📊 Relatório geral</button>
@@ -121,6 +123,7 @@
         <label><input type="radio" name="tipoEvento" value="colisao" checked /> 💥 Colisão</label>
         <label><input type="radio" name="tipoEvento" value="terceiro" /> 🚙 Carro de terceiro</label>
         <label><input type="radio" name="tipoEvento" value="vidro" /> 🪟 Vidros / para-brisa</label>
+        <label><input type="radio" name="tipoEvento" value="remocao" /> 🛻 Remoção do veículo</label>
       </div>
       <label>Placa<input name="placa" required placeholder="QXX0A00" autocomplete="off" />
         <a id="linkFipeForm" class="link-fipe hidden" href="https://placafipe.com.br/" target="_blank" onclick="copiarPlacaFipe();event.stopPropagation()">🔎 Consultar no PlacaFipe</a>
@@ -169,8 +172,18 @@
         </select>
       </label>
       <div id="vidroResumo" class="full vidro-resumo hidden" aria-live="polite"></div>
+      <label id="lblEnderecoRetirada" class="full hidden">Endereço de retirada do veículo
+        <textarea name="enderecoRetirada" rows="2" placeholder="Rua, número — bairro, cidade/UF — CEP"></textarea>
+        <span id="enderecoHint" class="fipe-hinova-hint hidden"></span>
+      </label>
+      <label id="lblPontoRef" class="full hidden">Ponto de referência (opcional)
+        <input name="pontoReferencia" placeholder="Ex.: em frente à farmácia, garagem no subsolo" />
+      </label>
+      <label id="lblOficina" class="full hidden">Oficina credenciada de destino
+        <select name="oficinaId"></select>
+      </label>
       <label>Data da ocorrência<input name="data" type="date" /></label>
-      <label class="full">Descrição
+      <label class="full"><span id="lblDescricaoTxt">Descrição</span>
         <textarea name="descricao" rows="2" placeholder="Resumo da ocorrência (opcional)"></textarea>
       </label>
       <label class="full check-label" id="lblHasTerceiro">
@@ -245,6 +258,36 @@
       <button type="button" class="btn-ghost" data-close="dlgAddCotacao">Cancelar</button>
       <button type="submit" class="btn-primary">Salvar cotação</button>
     </div>
+  </form>
+</dialog>
+
+<!-- ═══ MODAL: OFICINAS CREDENCIADAS + 0800 ═══ -->
+<dialog id="dlgOficinas">
+  <div class="modal-header">
+    <h2>Remoção: oficinas e central 0800</h2>
+    <button class="btn-close" data-close="dlgOficinas">✕</button>
+  </div>
+  <div class="forn-add-form forn-add-topo">
+    <h4>Central 0800 (assistência 24h)</h4>
+    <div class="form-grid">
+      <label class="full">WhatsApp da central 0800
+        <input id="wa0800" type="tel" inputmode="tel" placeholder="(81) 99999-0000" />
+        <span class="tpl-help">Se ficar em branco, o WhatsApp abre para você escolher o contato na hora.</span>
+      </label>
+    </div>
+    <button type="button" class="btn-primary" id="btnSalvar0800">Salvar contato do 0800</button>
+  </div>
+  <h4 class="forn-lista-titulo">Oficinas credenciadas</h4>
+  <div id="oficinasList" class="forn-list"></div>
+  <form id="formOficina" class="forn-add-form">
+    <h4>Nova oficina credenciada</h4>
+    <div class="form-grid">
+      <label class="full">Nome da oficina<input name="nome" required placeholder="Ex.: Oficina Boa Viagem" /></label>
+      <label class="full">Endereço completo<input name="endereco" required placeholder="Rua, número — bairro, cidade/UF" /></label>
+      <label>Telefone / WhatsApp<input name="telefone" type="tel" inputmode="tel" placeholder="(81) 99999-0000" /></label>
+      <label>Contato (opcional)<input name="contato" placeholder="Nome do responsável" /></label>
+    </div>
+    <button type="submit" class="btn-primary">+ Adicionar oficina</button>
   </form>
 </dialog>
 
@@ -356,7 +399,10 @@
     <label class="tpl-label">Mensagem de cotação para fornecedor
       <textarea id="tplCotacao" rows="8"></textarea>
     </label>
-    <p class="tpl-help">Variáveis disponíveis: {{fornecedor}} {{veiculo}} {{placa}} {{pecas}} {{cep}}</p>
+    <label class="tpl-label">Cotação de para-brisa / vidros para vidraçaria
+      <textarea id="tplCotacaoVidro" rows="8"></textarea>
+    </label>
+    <p class="tpl-help">Variáveis das cotações: {{fornecedor}} {{modelo}} {{ano}} {{cor}} {{placa}} {{chassi}} {{veiculo}} {{pecas}} {{cep}} — linha com variável vazia some sozinha da mensagem.</p>
     <label class="tpl-label">Mensagem de atualização de evento
       <textarea id="tplAtualizacao" rows="8"></textarea>
     </label>
@@ -371,6 +417,13 @@
       <textarea id="tplVidroLimite" rows="8"></textarea>
     </label>
     <p class="tpl-help">Variáveis de vidros: {{associado}} {{veiculo}} {{placa}} {{plano}} {{peca}} {{cobertura}} {{valor_total}} {{valor_bravax}} {{valor_associado}} {{ultima_troca}} {{proxima_troca}}</p>
+    <label class="tpl-label">Remoção — pedido ao 0800
+      <textarea id="tplRemocao0800" rows="10"></textarea>
+    </label>
+    <label class="tpl-label">Remoção — aviso ao associado
+      <textarea id="tplRemocaoAssociado" rows="8"></textarea>
+    </label>
+    <p class="tpl-help">Variáveis de remoção: {{veiculo}} {{placa}} {{chassi}} {{associado}} {{telefone}} {{numero}} {{endereco_retirada}} {{ponto_referencia}} {{oficina}} {{oficina_endereco}} {{oficina_telefone}} {{oficina_contato}} {{observacao}} {{confirmado_por}} {{confirmado_em}}</p>
   </div>
   <div class="modal-footer">
     <button class="btn-ghost" id="btnRestaurarTpl">Restaurar padrão</button>
@@ -385,10 +438,17 @@
     <h2>Mensagem para fornecedor</h2>
     <button class="btn-close" data-close="dlgWhatsApp">✕</button>
   </div>
+  <div class="wa-selecao">
+    <label class="wa-forn">Fornecedor
+      <select id="waFornSelect"></select>
+    </label>
+  </div>
   <div class="wa-selecao" id="waSelecaoPecas"></div>
-  <div class="wa-preview" id="waPreview"></div>
+  <label class="wa-preview-label" for="waPreview">Mensagem (pode ajustar antes de enviar)</label>
+  <textarea class="wa-preview" id="waPreview" rows="12"></textarea>
   <div class="modal-footer">
     <button class="btn-ghost" data-close="dlgWhatsApp">Fechar</button>
+    <button class="btn-ghost" id="btnCopiarWA">📋 Copiar</button>
     <button class="btn-whatsapp" id="btnAbrirWA">Abrir no WhatsApp</button>
   </div>
 </dialog>

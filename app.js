@@ -12,10 +12,13 @@ const COTAS      = { uber: 7, antigo: 6, novo: 5 };
 const DIAS_PARADO = 45;
 
 const DEFAULT_TPL = {
-  cotacao: `Olá {{fornecedor}}! Tudo bem?\n\nPreciso de uma cotação para o veículo abaixo:\n\n🚗 {{veiculo}}\n🔑 Placa: {{placa}}\n\nPeças necessárias:\n{{pecas}}\n\nFavor informar por peça:\n- Valor unitário\n- Frete para Recife/PE (CEP: {{cep}})\n- Prazo de entrega\n- Garantia\n\nObrigado!`,
+  cotacao: `Olá {{fornecedor}}! Tudo bem?\n\nPreciso de uma cotação para o veículo abaixo:\n\n🚗 {{modelo}}\n📅 Ano: {{ano}}\n🎨 Cor: {{cor}}\n🔑 Placa: {{placa}}\n🔢 Chassi: {{chassi}}\n\nPeças necessárias:\n{{pecas}}\n\nFavor informar por peça:\n- Valor unitário\n- Se é original, paralela ou usada\n- Frete para Recife/PE (CEP: {{cep}})\n- Prazo de entrega\n- Garantia\n\nObrigado!`,
+  cotacaoVidro: `Olá {{fornecedor}}! Tudo bem?\n\nPreciso de cotação de vidro para o veículo abaixo:\n\n🚗 {{modelo}}\n📅 Ano: {{ano}}\n🎨 Cor: {{cor}}\n🔑 Placa: {{placa}}\n🔢 Chassi: {{chassi}}\n\nPeça:\n{{pecas}}\n\nFavor informar:\n- Valor com instalação\n- Marca do vidro (original ou paralelo)\n- Se tem sensor de chuva ou suporte de câmera, se o carro tiver\n- Prazo para instalação\n- Garantia\n- Se atende no local ou o carro precisa ir até vocês\n\nObrigado!`,
   atualizacao: `🔔 *ATUALIZAÇÃO DE EVENTO*\n\n🚗 {{veiculo}} — {{placa}}\n👤 {{associado}}\n📋 {{numero}}\n\n📝 {{texto}}\n\n— {{autor}}, {{quando}}\n\n🔗 Ver no sistema: {{link}}`,
   vidroCoberto: `Olá, {{associado}}! Tudo bem? 😊\n\nAqui é da Bravax Protege. Confirmamos que o seu plano *{{plano}}* cobre a troca de *{{peca}}* do seu {{veiculo}} (placa {{placa}}).\n\n💰 Valor total da troca: *{{valor_total}}*\n✅ A Bravax paga 70%: *{{valor_bravax}}*\n👤 Sua participação (30%): *{{valor_associado}}*\n\nAssim que você confirmar, seguimos com o agendamento da troca.\n\nℹ️ A cobertura de vidros vale para 1 troca a cada 12 meses.`,
   vidroSemCobertura: `Olá, {{associado}}! Tudo bem?\n\nAqui é da Bravax Protege. Verificamos o seu {{veiculo}} (placa {{placa}}) e o plano *{{plano}}* não inclui a cobertura de *{{peca}}*.\n\n💡 No plano *Platinum* você tem cobertura de todos os vidros, faróis e lanternas — e a Bravax paga 70% de cada troca.\n\nQuer que a gente te passe os valores para migrar de plano?`,
+  remocao0800: `🛻 *SOLICITAÇÃO DE REMOÇÃO — Bravax Protege*\n\nOlá, equipe 0800! Precisamos da remoção do veículo abaixo:\n\n🚗 Veículo: {{veiculo}}\n🔑 Placa: {{placa}}\n👤 Associado: {{associado}}\n📞 Contato do associado: {{telefone}}\n📋 Evento: {{numero}}\n\n📍 *Retirar em* (endereço confirmado com o associado):\n{{endereco_retirada}}\nPonto de referência: {{ponto_referencia}}\n\n🔧 *Levar para a oficina credenciada:*\n{{oficina}}\n{{oficina_endereco}}\nTelefone da oficina: {{oficina_telefone}}\n\n📝 Observação: {{observacao}}\n\nPor favor, nos confirmem o protocolo e a previsão de chegada. Obrigado!`,
+  remocaoAssociado: `Olá, {{associado}}! Tudo bem?\n\nAqui é da Bravax Protege. Já solicitamos ao 0800 a remoção do seu {{veiculo}} (placa {{placa}}).\n\n📍 Retirada em: {{endereco_retirada}}\n🔧 Destino: oficina credenciada {{oficina}} — {{oficina_endereco}}\n\nAssim que o 0800 nos passar a previsão de chegada, te avisamos. Se o carro mudar de lugar, fale com a gente antes, combinado?`,
   vidroLimite: `Olá, {{associado}}! Tudo bem?\n\nAqui é da Bravax Protege. A cobertura de vidros do seu plano permite *1 troca a cada 12 meses*, e a última troca do seu {{veiculo}} (placa {{placa}}) foi em *{{ultima_troca}}*.\n\nA próxima troca coberta fica disponível a partir de *{{proxima_troca}}*. Se precisar antes disso, podemos te ajudar com uma cotação particular.`,
 };
 
@@ -35,6 +38,7 @@ const TEXTO_COBERTURA = {
 
 function categoriaDoEvento(evt) {
   if (evt.categoriaEvento === 'vidro') return 'vidro';
+  if (evt.categoriaEvento === 'remocao') return 'remocao';
   return evt.ehTerceiro ? 'terceiro' : 'colisao';
 }
 
@@ -59,6 +63,50 @@ function trocaVidroRecente(placa, dataRef, ignorarId) {
   if (!achados.length) return null;
   const proxima = new Date(achados[0].t + VIDRO_INTERVALO_DIAS * 86400000);
   return { evt: achados[0].evt, ultima: new Date(achados[0].t), proxima };
+}
+
+// ─── REMOÇÃO DO VEÍCULO ─────────────────────────────────────────
+// A confirmação de endereço vale para UM envio e por poucas horas: se o
+// endereço mudar depois de confirmado, ou o tempo passar, pede de novo.
+const REMOCAO_CONF_VALIDADE_H = 4;
+
+function oficinaDoEvento(evt) {
+  return (state.oficinas || []).find(o => o.id === evt.oficinaId) || null;
+}
+
+function confirmacaoRemocaoValida(evt) {
+  const c = evt.remocao?.confirmacao;
+  if (!c || !evt.enderecoRetirada || c.endereco !== evt.enderecoRetirada) return null;
+  if (Date.now() - new Date(c.em).getTime() > REMOCAO_CONF_VALIDADE_H * 3600000) return null;
+  return c;
+}
+
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function dataHora(iso) {
+  return new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+
+function telWhatsApp(tel) {
+  const d = String(tel || '').replace(/\D/g, '');
+  return d.length >= 10 ? (d.startsWith('55') ? d : '55' + d) : '';
+}
+
+function mostrarToast(msg, tipo = 'ok') {
+  let t = document.getElementById('toast');
+  if (!t) {
+    t = document.createElement('div');
+    t.id = 'toast';
+    t.setAttribute('role', 'status');
+    t.setAttribute('aria-live', 'polite');
+    document.body.appendChild(t);
+  }
+  t.textContent = msg;
+  t.className = `toast toast-${tipo} show`;
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.classList.remove('show'), 3500);
 }
 
 function divisaoVidro(valor) {
@@ -164,8 +212,14 @@ function loadTemplates() {
   return { ...DEFAULT_TPL };
 }
 function saveTemplates(t) { localStorage.setItem(TPL_KEY, JSON.stringify(t)); }
+// Linha cujas variáveis vieram todas vazias some (ex.: "Chassi:" sem chassi),
+// para a mensagem não sair com rótulo pendurado.
 function preencherTemplate(tpl, dados) {
-  return tpl.replace(/\{\{(\w+)\}\}/g, (_, k) => dados[k] ?? '');
+  return tpl.split('\n').map(linha => {
+    const vars = [...linha.matchAll(/\{\{(\w+)\}\}/g)].map(m => m[1]);
+    if (vars.length && vars.every(k => !String(dados[k] ?? '').trim())) return null;
+    return linha.replace(/\{\{(\w+)\}\}/g, (_, k) => dados[k] ?? '');
+  }).filter(l => l !== null).join('\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
 // ─── UTILITÁRIOS ────────────────────────────────────────────────
@@ -204,7 +258,8 @@ function diasSemAtualizacao(evt) {
   if (datas.length) ultima = Math.max(...datas);
   else if (evt.data) ultima = new Date(evt.data + 'T12:00:00').getTime();
   else return null;
-  return Math.floor((Date.now() - ultima) / 86400000);
+  // Data do evento é guardada como meio-dia: antes das 12h do próprio dia a conta daria -1
+  return Math.max(0, Math.floor((Date.now() - ultima) / 86400000));
 }
 
 // Retorna {texto, stale} para exibir os dias desde a última atualização.
@@ -241,7 +296,7 @@ function historicoPeca(nomePeca) {
 }
 
 function calcCota(evt) {
-  if (categoriaDoEvento(evt) === 'vidro' || !evt.fipe) return null;
+  if (categoriaDoEvento(evt) !== 'colisao' || !evt.fipe) return null;
   return (parseFloat(evt.fipe) * (COTAS[evt.tipo] || 5)) / 100;
 }
 
@@ -249,7 +304,9 @@ function computeStatus(evt) {
   if (evt.encerrado) return { label: 'Encerrado', cls: 'green' };
   const ck = evt.checklist || {};
   const cat = categoriaDoEvento(evt);
-  const itens = cat === 'vidro'
+  const itens = cat === 'remocao'
+    ? [ck.comunicou0800, ck.veiculoNaOficina]
+    : cat === 'vidro'
     ? [ck.comunicou0800, ck.cotaPaga, ck.termoAssociado]
     : cat === 'terceiro'
     ? [ck.comunicou0800, ck.boRealizado, ck.termoAssociado]
@@ -360,6 +417,8 @@ function _renderList() {
     filtered = filtered.filter(e => e.ehTerceiro);
   } else if (filtroAtivo === 'vidros') {
     filtered = filtered.filter(e => categoriaDoEvento(e) === 'vidro');
+  } else if (filtroAtivo === 'remocoes') {
+    filtered = filtered.filter(e => categoriaDoEvento(e) === 'remocao');
   }
 
   if (!filtered.length) {
@@ -378,8 +437,8 @@ function _renderList() {
           <span class="evt-placa">${evt.placa}</span>
           <span class="evt-dot">${st.label}</span>
         </div>
-        <div class="evt-nome">${evt.ehTerceiro ? '🚙 ' : ''}${categoriaDoEvento(evt) === 'vidro' ? '🪟 ' : ''}${evt.associado}</div>
-        <div class="evt-sub">${evt.veiculo || '—'}${evt.ano ? ' ' + evt.ano : ''} · ${evt.pecas?.length || 0}p · ${nCot}q${diasInfo ? ` · <span class="${diasInfo.stale ? 'stale-flag' : 'dias-flag'}">${diasInfo.texto}</span>` : ''}</div>
+        <div class="evt-nome">${evt.ehTerceiro ? '🚙 ' : ''}${categoriaDoEvento(evt) === 'vidro' ? '🪟 ' : ''}${categoriaDoEvento(evt) === 'remocao' ? '🛻 ' : ''}${evt.associado}</div>
+        <div class="evt-sub">${evt.veiculo || '—'}${evt.ano ? ' ' + evt.ano : ''} · ${evt.pecas?.length || 0}p · ${nCot}q${diasInfo ? ` · <span class="${diasInfo.stale ? 'stale-flag' : 'dias-flag'}">${diasInfo.texto}</span>` : ''}${categoriaDoEvento(evt) === 'remocao' && !evt.encerrado && !evt.remocao?.envios?.length ? ` · <span class="stale-flag">⚠️ ${!evt.enderecoRetirada ? 'falta endereço' : !oficinaDoEvento(evt) ? 'falta oficina' : 'pendente: confirmar endereço'}</span>` : ''}</div>
       </div>`;
   }).join('');
 }
@@ -426,6 +485,7 @@ function _renderDetail() {
             <span class="badge badge-${st.cls}">${st.label}</span>
             ${evt.ehTerceiro ? '<span class="badge badge-gray">Terceiro</span>' : ''}
             ${categoriaDoEvento(evt) === 'vidro' ? '<span class="badge badge-gray">Vidros</span>' : ''}
+            ${categoriaDoEvento(evt) === 'remocao' ? '<span class="badge badge-gray">Remoção</span>' : ''}
             ${diasInfo ? `<span class="badge ${diasInfo.stale ? 'badge-stale' : 'badge-dias'}">${diasInfo.texto}</span>` : ''}
           </div>
           <div class="detail-veiculo">${descreveVeiculo(evt) || '—'}</div>
@@ -449,7 +509,7 @@ function _renderDetail() {
       </div>
 
       <!-- COTA DE PARTICIPAÇÃO / TERCEIRO / VIDROS -->
-      ${categoriaDoEvento(evt) === 'vidro' ? renderVidroCard(evt) : evt.ehTerceiro ? `
+      ${categoriaDoEvento(evt) === 'remocao' ? renderRemocaoCard(evt) : categoriaDoEvento(evt) === 'vidro' ? renderVidroCard(evt) : evt.ehTerceiro ? `
         <div class="terceiro-card">
           <div>
             <div class="cota-label">Carro de terceiro — sem cota de participação</div>
@@ -507,8 +567,8 @@ function _renderDetail() {
         ${renderFotos(evt)}
       </div>
 
-      <!-- COMPARATIVO DE PEÇAS -->
-      <div class="section-card">
+      <!-- COMPARATIVO DE PEÇAS (não se aplica à remoção) -->
+      ${categoriaDoEvento(evt) === 'remocao' ? '' : `<div class="section-card">
         <div class="section-toolbar">
           <div class="section-toolbar-left">
             <span class="section-title">Comparativo de peças</span>
@@ -520,11 +580,12 @@ function _renderDetail() {
               <input type="file" accept="image/*" onchange="handleFotoUpload(event,'${evt.id}')" />
             </label>
             <button class="btn-ghost-sm" onclick="openAddPeca('${evt.id}')">+ Peça</button>
+            ${evt.pecas?.length ? `<button class="btn-wa-save" onclick="openWA('${evt.id}', null)">💬 Pedir cotação</button>` : ''}
             ${evt.pecas?.length ? `<button class="btn-ghost-sm" onclick="exportar('${evt.id}')">📤 Exportar</button>` : ''}
           </div>
         </div>
         ${renderComparativo(evt)}
-      </div>
+      </div>`}
 
     </div>`;
 }
@@ -583,11 +644,178 @@ function enviarMsgVidroAssociado(eventoId) {
   window.open(`https://wa.me/${numero}?text=${encodeURIComponent(msg)}`, '_blank');
 }
 
+// ── Cartão de remoção (endereço confirmado → libera pedido ao 0800) ──
+function renderRemocaoCard(evt) {
+  const of = oficinaDoEvento(evt);
+  const conf = confirmacaoRemocaoValida(evt);
+  const envios = evt.remocao?.envios || [];
+  const ult = envios[envios.length - 1];
+
+  let gate;
+  if (!evt.enderecoRetirada) {
+    gate = `<div class="remocao-pend err">❌ Falta o endereço de retirada — clique em ✏️ Editar e preencha.</div>`;
+  } else if (!of) {
+    gate = `<div class="remocao-pend err">❌ ${evt.oficinaId ? 'A oficina escolhida foi removida do cadastro' : 'Falta escolher a oficina credenciada de destino'} — clique em ✏️ Editar.${(state.oficinas || []).length ? '' : ' Cadastre as oficinas em 🔧 Oficinas e 0800.'}</div>`;
+  } else if (!conf) {
+    gate = `
+      <div class="remocao-pend warn">
+        <strong>⚠️ Pendência obrigatória antes ${envios.length ? 'do novo envio' : 'do envio'}</strong>
+        <p>Confirme com o associado que o endereço de retirada acima está atualizado. A mensagem para o 0800 só é liberada depois disso.</p>
+        <div class="remocao-acoes">
+          <button class="btn-primary" onclick="confirmarEnderecoRemocao('${evt.id}')">✅ Confirmei com o associado</button>
+          <button class="btn-ghost-sm" onclick="openEditEvento('${evt.id}')">✏️ Corrigir endereço</button>
+        </div>
+      </div>`;
+  } else {
+    gate = `<div class="remocao-pend ok">✅ Endereço confirmado por <strong>${esc(conf.por)}</strong> em ${dataHora(conf.em)} — mensagem liberada para 1 envio.</div>`;
+  }
+
+  const liberado = !!(evt.enderecoRetirada && of && conf);
+  return `
+    <div class="remocao-card">
+      <div class="cota-label">Remoção do veículo</div>
+      <div class="remocao-rota">
+        <div>
+          <span>📍 Retirada</span>
+          <strong>${esc(evt.enderecoRetirada) || '—'}</strong>
+          ${evt.pontoReferencia ? `<em>Ref.: ${esc(evt.pontoReferencia)}</em>` : ''}
+          ${evt.enderecoRetirada ? `<small>${evt.enderecoFonte === 'sga' ? 'Endereço do cadastro no SGA' : 'Endereço informado manualmente'}</small>` : ''}
+        </div>
+        <div>
+          <span>🔧 Oficina de destino</span>
+          <strong>${of ? esc(of.nome) : '—'}</strong>
+          ${of ? `<em>${esc(of.endereco)}</em>` : ''}
+          ${of?.telefone ? `<small>${esc(of.telefone)}</small>` : ''}
+        </div>
+      </div>
+      ${gate}
+      <div class="remocao-acoes">
+        <button class="btn-wa-save" ${liberado ? '' : 'disabled title="Confirme o endereço com o associado primeiro"'} onclick="enviarRemocao0800('${evt.id}','whatsapp')">💬 Enviar pedido ao 0800</button>
+        <button class="btn-ghost-sm" ${liberado ? '' : 'disabled title="Confirme o endereço com o associado primeiro"'} onclick="enviarRemocao0800('${evt.id}','copia')">📋 Copiar mensagem</button>
+        ${envios.length ? `<button class="btn-ghost-sm" onclick="avisarAssociadoRemocao('${evt.id}')">💬 Avisar associado</button>` : ''}
+      </div>
+      ${ult ? `<div class="remocao-hist">Pedidos ao 0800: ${envios.length} · último em ${dataHora(ult.em)} por ${esc(ult.por)}</div>` : ''}
+    </div>`;
+}
+
+function confirmarEnderecoRemocao(eventoId) {
+  const evt = state.eventos.find(e => e.id === eventoId);
+  if (!evt?.enderecoRetirada) return;
+  const ok = confirm(`Você confirmou com o associado, agora, que este é o endereço atualizado para a retirada?\n\n${evt.enderecoRetirada}${evt.pontoReferencia ? '\nRef.: ' + evt.pontoReferencia : ''}`);
+  if (!ok) return;
+  evt.remocao = evt.remocao || { envios: [] };
+  evt.remocao.confirmacao = { por: currentUser?.nome || '—', em: new Date().toISOString(), endereco: evt.enderecoRetirada };
+  saveState();
+  renderAll();
+  mostrarToast('Endereço confirmado — pedido ao 0800 liberado.');
+}
+
+function dadosMsgRemocao(evt, of, conf) {
+  return {
+    veiculo: descreveVeiculo(evt), modelo: evt.veiculo, ano: evt.ano, cor: evt.cor, placa: evt.placa, chassi: evt.chassi,
+    associado: evt.associado, telefone: evt.telefone, numero: evt.numero,
+    endereco_retirada: evt.enderecoRetirada, ponto_referencia: evt.pontoReferencia,
+    oficina: of?.nome, oficina_endereco: of?.endereco, oficina_telefone: of?.telefone, oficina_contato: of?.contato,
+    observacao: evt.descricao,
+    confirmado_por: conf?.por, confirmado_em: conf ? dataHora(conf.em) : '',
+  };
+}
+
+async function enviarRemocao0800(eventoId, canal) {
+  const evt = state.eventos.find(e => e.id === eventoId);
+  if (!evt) return;
+  const of = oficinaDoEvento(evt);
+  const conf = confirmacaoRemocaoValida(evt);
+  // Trava de verdade (não só o botão desabilitado): sem confirmação válida, nada sai
+  if (!evt.enderecoRetirada || !of || !conf) {
+    mostrarToast('Confirme com o associado que o endereço está atualizado antes de enviar.', 'err');
+    renderDetail();
+    return;
+  }
+  const msg = preencherTemplate(templates.remocao0800, dadosMsgRemocao(evt, of, conf));
+  if (canal === 'whatsapp') {
+    window.open(`https://wa.me/${telWhatsApp(state.config?.whatsapp0800)}?text=${encodeURIComponent(msg)}`, '_blank');
+  } else {
+    try { await navigator.clipboard.writeText(msg); }
+    catch { mostrarToast('Não consegui copiar automaticamente. Tente de novo.', 'err'); return; }
+  }
+
+  evt.remocao.envios = evt.remocao.envios || [];
+  evt.remocao.envios.push({
+    por: currentUser?.nome || '—', em: new Date().toISOString(), canal,
+    endereco: evt.enderecoRetirada, oficina: of.nome,
+    confirmadoPor: conf.por, confirmadoEm: conf.em,
+  });
+  evt.remocao.confirmacao = null; // cada envio consome a confirmação — o próximo exige outra
+  evt.checklist = evt.checklist || {};
+  evt.checklist.comunicou0800 = true;
+  evt.atualizacoes = evt.atualizacoes || [];
+  evt.atualizacoes.push({
+    id: uid(), autor: currentUser?.nome || '—', data: new Date().toISOString(),
+    texto: `🛻 Pedido de remoção ${canal === 'whatsapp' ? 'enviado ao 0800 pelo WhatsApp' : 'copiado para enviar ao 0800'}. Retirada: ${evt.enderecoRetirada}${evt.pontoReferencia ? ' (ref.: ' + evt.pontoReferencia + ')' : ''} → oficina ${of.nome}. Endereço confirmado com o associado por ${conf.por} em ${dataHora(conf.em)}.`,
+  });
+  saveState();
+  renderAll();
+  mostrarToast(canal === 'whatsapp' ? 'Pedido registrado. Confira o envio no WhatsApp.' : 'Mensagem copiada e pedido registrado.');
+}
+
+function avisarAssociadoRemocao(eventoId) {
+  const evt = state.eventos.find(e => e.id === eventoId);
+  if (!evt) return;
+  const of = oficinaDoEvento(evt);
+  const dados = dadosMsgRemocao(evt, of, null);
+  dados.associado = (evt.associado || '').split(' ')[0];
+  const msg = preencherTemplate(templates.remocaoAssociado, dados);
+  window.open(`https://wa.me/${telWhatsApp(evt.telefone)}?text=${encodeURIComponent(msg)}`, '_blank');
+}
+
+// ─── OFICINAS CREDENCIADAS + CENTRAL 0800 ──────────────────────
+function renderOficinas() {
+  const list = document.getElementById('oficinasList');
+  const ofs = state.oficinas || [];
+  list.innerHTML = ofs.length
+    ? ofs.map(o => `
+      <div class="forn-item">
+        <div class="forn-info">
+          <strong>${esc(o.nome)}</strong>
+          <span>${esc(o.endereco)}</span>
+          ${o.telefone ? `<span>${esc(o.telefone)}</span>` : ''}
+          ${o.contato ? `<span>Contato: ${esc(o.contato)}</span>` : ''}
+        </div>
+        <button class="btn-icon danger" onclick="deleteOficina('${o.id}')" title="Remover oficina">✕</button>
+      </div>`).join('')
+    : '<p class="forn-vazio">Nenhuma oficina cadastrada ainda. Cadastre abaixo as oficinas credenciadas para usar nas remoções.</p>';
+  document.getElementById('wa0800').value = state.config?.whatsapp0800 || '';
+}
+
+function popularOficinasSelect(selecionada) {
+  const sel = document.getElementById('formEvento').oficinaId;
+  const ofs = state.oficinas || [];
+  sel.innerHTML = ofs.length
+    ? '<option value="">— Selecione a oficina —</option>' + ofs.map(o => `<option value="${o.id}">${esc(o.nome)} — ${esc(o.endereco)}</option>`).join('')
+    : '<option value="">— Nenhuma oficina cadastrada (cadastre em 🔧 Oficinas e 0800) —</option>';
+  sel.value = ofs.some(o => o.id === selecionada) ? selecionada : '';
+}
+
+function deleteOficina(id) {
+  const o = (state.oficinas || []).find(x => x.id === id);
+  if (!o) return;
+  const emUso = state.eventos.filter(e => e.oficinaId === id && !e.encerrado).length;
+  if (!confirm(`Remover a oficina ${o.nome}?${emUso ? `\n\n${emUso} evento(s) de remoção em aberto usam essa oficina e vão pedir outra antes do próximo envio.` : ''}`)) return;
+  state.oficinas = state.oficinas.filter(x => x.id !== id);
+  saveState();
+  renderOficinas();
+  renderAll();
+}
+
 // ── Checklist ────────────────────────────────────────────────────
 function renderChecklist(evt) {
   const ck = evt.checklist || {};
   const ehVidro = categoriaDoEvento(evt) === 'vidro';
-  const items = ehVidro ? [
+  const items = categoriaDoEvento(evt) === 'remocao' ? [
+    { key: 'comunicou0800',    label: '0800 acionado' },
+    { key: 'veiculoNaOficina', label: 'Veículo na oficina' },
+  ] : ehVidro ? [
     { key: 'comunicou0800',  label: '0800' },
     { key: 'cotaPaga',       label: 'Participação 30% paga' },
     { key: 'termoAssociado', label: 'Termo' },
@@ -815,6 +1043,8 @@ let hinovaBuscaTimer = null;
 let veiculoForm = null;
 // Último FIPE preenchido automaticamente — se o atendente mudar o valor, a fonte vira "manual"
 let fipeAuto = null;
+// Último endereço preenchido pelo SGA — se o atendente mudar, a fonte vira "manual"
+let enderecoAuto = null;
 
 function tipoEventoForm() {
   return document.querySelector('#formEvento input[name="tipoEvento"]:checked')?.value || 'colisao';
@@ -872,7 +1102,21 @@ async function buscarVeiculoNaHinova(placa) {
       codigoFipe: d.codigoFipe || null,
       anoModelo: d.anoModelo || d.ano || null,
       tipoFipe: d.tipoFipe || 'cars',
+      chassi: d.chassi || null,
     };
+
+    // Endereço do cadastro (usado na remoção) — nunca sobrescreve o que o atendente digitou
+    const endHint = document.getElementById('enderecoHint');
+    const endAtual = f.enderecoRetirada.value.trim();
+    if (d.endereco && (!endAtual || endAtual === enderecoAuto)) {
+      f.enderecoRetirada.value = d.endereco;
+      enderecoAuto = d.endereco;
+      endHint.textContent = '📍 Endereço do cadastro no SGA — confirme com o associado antes de pedir a remoção.';
+      endHint.classList.remove('hidden');
+    } else if (!d.endereco) {
+      endHint.textContent = '⚠️ O SGA não tem endereço cadastrado para esse associado — preencha manualmente.';
+      endHint.classList.remove('hidden');
+    }
 
     fipeHint.classList.add('hidden');
     if (d.fipeZerada) {
@@ -945,19 +1189,28 @@ function atualizarFormTipo() {
   const tipoEv = tipoEventoForm();
   const ehTerceiro = tipoEv === 'terceiro';
   const ehVidro = tipoEv === 'vidro';
+  const ehRemocao = tipoEv === 'remocao';
+  const semCota = ehTerceiro || ehVidro || ehRemocao;
   const coberturaSga = veiculoForm?.coberturaVidros;
   const coberturaConhecida = !!PECAS_POR_COBERTURA[coberturaSga];
+  const f = document.getElementById('formEvento');
 
-  document.getElementById('lblTipo').classList.toggle('hidden', ehTerceiro || ehVidro);
+  document.getElementById('lblTipo').classList.toggle('hidden', semCota);
   // Tipo de associado só é obrigatório em colisão (campo escondido não pode bloquear o salvar)
-  document.getElementById('formEvento').tipo.required = !(ehTerceiro || ehVidro);
-  document.getElementById('lblFipe').classList.toggle('hidden', ehTerceiro || ehVidro);
-  document.getElementById('lblHasTerceiro').classList.toggle('hidden', ehTerceiro || ehVidro);
+  f.tipo.required = !semCota;
+  document.getElementById('lblFipe').classList.toggle('hidden', semCota);
+  document.getElementById('lblHasTerceiro').classList.toggle('hidden', semCota);
+  document.getElementById('lblEnderecoRetirada').classList.toggle('hidden', !ehRemocao);
+  document.getElementById('lblPontoRef').classList.toggle('hidden', !ehRemocao);
+  document.getElementById('lblOficina').classList.toggle('hidden', !ehRemocao);
+  f.enderecoRetirada.required = ehRemocao;
+  document.getElementById('lblDescricaoTxt').textContent = ehRemocao
+    ? 'Observação para o 0800 (ex.: carro não liga, está em garagem no subsolo)' : 'Descrição';
   document.getElementById('lblAssociadoEnvolvido').classList.toggle('hidden', !ehTerceiro);
   document.getElementById('lblPecaVidro').classList.toggle('hidden', !ehVidro);
   document.getElementById('lblValorVidro').classList.toggle('hidden', !ehVidro);
   document.getElementById('lblCoberturaManual').classList.toggle('hidden', !ehVidro || coberturaConhecida);
-  document.getElementById('btnFipeHoje').classList.toggle('hidden', !veiculoForm?.codigoFipe || ehTerceiro || ehVidro);
+  document.getElementById('btnFipeHoje').classList.toggle('hidden', !veiculoForm?.codigoFipe || semCota);
   document.getElementById('lblAssociadoTxt').textContent = ehTerceiro
     ? 'Nome do terceiro (dono do carro)' : 'Nome do associado';
 
@@ -1012,7 +1265,10 @@ function openNovoEvento() {
   f.data.value = new Date().toISOString().split('T')[0];
   veiculoForm = null;
   fipeAuto = null;
+  enderecoAuto = null;
   popularListaAssociados();
+  popularOficinasSelect('');
+  document.getElementById('enderecoHint').classList.add('hidden');
   atualizarFormTipo();
   atualizarLinkFipe();
   hinovaBuscaSeq++; clearTimeout(hinovaBuscaTimer); // invalida busca pendente do modal anterior
@@ -1042,12 +1298,18 @@ function openEditEvento(eventoId) {
   const cat = categoriaDoEvento(evt);
   f.querySelector(`input[name="tipoEvento"][value="${cat}"]`).checked = true;
   f.pecaVidro.value = evt.pecaVidro || 'Para-brisa';
+  f.enderecoRetirada.value = evt.enderecoRetirada || '';
+  f.pontoReferencia.value = evt.pontoReferencia || '';
+  popularOficinasSelect(evt.oficinaId || '');
+  enderecoAuto = evt.enderecoFonte === 'sga' ? (evt.enderecoRetirada || null) : null;
+  document.getElementById('enderecoHint').classList.add('hidden');
   f.valorVidro.value = evt.valorVidro ? formatMoeda(evt.valorVidro) : '';
   // Reaproveita o que já foi confirmado no SGA quando o evento foi criado
-  veiculoForm = (evt.planoVeiculo || evt.coberturaVidros || evt.codigoFipe) ? {
+  veiculoForm = (evt.planoVeiculo || evt.coberturaVidros || evt.codigoFipe || evt.chassi) ? {
     plano: evt.planoVeiculo || null,
     coberturaVidros: evt.coberturaVidrosFonte === 'sga' ? evt.coberturaVidros : null,
     codigoFipe: evt.codigoFipe || null, anoModelo: evt.anoModelo || evt.ano || null, tipoFipe: evt.tipoFipe || 'cars',
+    chassi: evt.chassi || null,
   } : null;
   f.coberturaManual.value = evt.coberturaVidrosFonte === 'manual' ? (evt.coberturaVidros || '') : '';
   fipeAuto = evt.fipe ? { valor: evt.fipe, referencia: evt.fipeReferencia || null, fonte: evt.fipeFonte || 'manual' } : null;
@@ -1099,12 +1361,20 @@ function openAddCotacao(eventoId, pecaId, prefillFornId) {
   document.getElementById('dlgAddCotacao').showModal();
 }
 
+// fornId = null quando o pedido sai do botão "Pedir cotação" (atendente escolhe o fornecedor)
 function openWA(eventoId, fornId) {
-  const evt  = state.eventos.find(e => e.id === eventoId);
-  const forn = state.fornecedores.find(f => f.id === fornId);
-  if (!evt || !forn) return;
+  const evt = state.eventos.find(e => e.id === eventoId);
+  if (!evt) return;
+  if (!state.fornecedores.length) {
+    mostrarToast('Cadastre um fornecedor em 👥 Fornecedores antes de pedir cotação.', 'err');
+    return;
+  }
 
-  waCtx = { eventoId, fornId };
+  // Fornecedores com WhatsApp primeiro
+  const fornSel = document.getElementById('waFornSelect');
+  const ordenados = [...state.fornecedores].sort((a, b) => (b.whatsapp ? 1 : 0) - (a.whatsapp ? 1 : 0));
+  fornSel.innerHTML = ordenados.map(f => `<option value="${f.id}">${esc(f.nome)}${f.whatsapp ? '' : ' (sem WhatsApp cadastrado)'}</option>`).join('');
+  fornSel.value = fornId && ordenados.some(f => f.id === fornId) ? fornId : ordenados[0].id;
 
   // Montar seleção de peças
   const sel = document.getElementById('waSelecaoPecas');
@@ -1112,19 +1382,18 @@ function openWA(eventoId, fornId) {
     evt.pecas.map(p => `
       <label class="wa-peca-check">
         <input type="checkbox" class="wa-peca-cb" data-id="${p.id}" checked />
-        ${p.nome} (${p.qtd || 1}× ${p.tipo})
+        ${esc(p.nome)} (${p.qtd || 1}× ${esc(p.tipo)})
       </label>`).join('');
 
-  // Gerar mensagem inicial
-  gerarMsgWA(evt, forn, evt.pecas.map(p => p.id));
-
-  // Atualizar mensagem ao mudar seleção
-  sel.querySelectorAll('.wa-peca-cb').forEach(cb =>
-    cb.addEventListener('change', () => {
-      const ids = [...sel.querySelectorAll('.wa-peca-cb:checked')].map(c => c.dataset.id);
-      gerarMsgWA(evt, forn, ids);
-    })
-  );
+  const regerar = () => {
+    const forn = state.fornecedores.find(f => f.id === fornSel.value);
+    waCtx = { eventoId, fornId: forn.id };
+    const ids = [...sel.querySelectorAll('.wa-peca-cb:checked')].map(c => c.dataset.id);
+    gerarMsgWA(evt, forn, ids);
+  };
+  fornSel.onchange = regerar;
+  sel.querySelectorAll('.wa-peca-cb').forEach(cb => cb.addEventListener('change', regerar));
+  regerar();
 
   document.getElementById('dlgWhatsApp').showModal();
 }
@@ -1132,10 +1401,13 @@ function openWA(eventoId, fornId) {
 function gerarMsgWA(evt, forn, pecaIds) {
   const pecas = evt.pecas.filter(p => pecaIds.includes(p.id));
   const lista = pecas.map(p => `• ${p.nome} (${p.qtd || 1}× ${p.tipo})`).join('\n');
-  const msg = preencherTemplate(templates.cotacao, {
-    fornecedor: forn.nome, veiculo: descreveVeiculo(evt), placa: evt.placa, pecas: lista, cep: CEP,
+  // Evento de vidro usa o pedido próprio para vidraçaria (instalação, sensor, marca do vidro)
+  const tpl = categoriaDoEvento(evt) === 'vidro' ? templates.cotacaoVidro : templates.cotacao;
+  const msg = preencherTemplate(tpl, {
+    fornecedor: forn.nome, veiculo: descreveVeiculo(evt), modelo: evt.veiculo, ano: evt.ano, cor: evt.cor,
+    placa: evt.placa, chassi: evt.chassi, pecas: lista, cep: CEP,
   });
-  document.getElementById('waPreview').textContent = msg;
+  document.getElementById('waPreview').value = msg;
 }
 
 // ─── FORMULÁRIOS ────────────────────────────────────────────────
@@ -1153,7 +1425,10 @@ function setupForms() {
     const tipoEv = tipoEventoForm();
     const ehTerceiro = tipoEv === 'terceiro';
     const ehVidro = tipoEv === 'vidro';
-    const fipeValor = ehTerceiro || ehVidro ? 0 : parseMoeda(f.fipe.value);
+    const ehRemocao = tipoEv === 'remocao';
+    const fipeValor = ehTerceiro || ehVidro || ehRemocao ? 0 : parseMoeda(f.fipe.value);
+    // Endereço numa linha só (a mensagem do 0800 fica mais limpa)
+    const endereco = ehRemocao ? f.enderecoRetirada.value.trim().replace(/\s*\n+\s*/g, ' — ') : '';
     // Data de referência só vale se o valor salvo for exatamente o que veio da tabela/SGA
     const fipeConfere = fipeAuto && fipeValor === fipeAuto.valor;
     const coberturaSga = PECAS_POR_COBERTURA[veiculoForm?.coberturaVidros] ? veiculoForm.coberturaVidros : null;
@@ -1171,10 +1446,15 @@ function setupForms() {
       fipeFonte:   fipeValor ? (fipeConfere ? fipeAuto.fonte : 'manual') : '',
       data:        f.data.value,
       descricao:   f.descricao.value.trim(),
-      hasTerceiro: ehVidro ? false : f.hasTerceiro.checked,
+      hasTerceiro: ehVidro || ehRemocao ? false : f.hasTerceiro.checked,
       ehTerceiro,
       associadoEnvolvido: ehTerceiro ? f.associadoEnvolvido.value.trim() : '',
-      categoriaEvento: ehVidro ? 'vidro' : 'colisao',
+      categoriaEvento: ehVidro ? 'vidro' : ehRemocao ? 'remocao' : 'colisao',
+      chassi:      veiculoForm?.chassi || '',
+      enderecoRetirada: endereco,
+      enderecoFonte: ehRemocao && endereco ? (enderecoAuto && endereco === enderecoAuto ? 'sga' : 'manual') : '',
+      pontoReferencia: ehRemocao ? f.pontoReferencia.value.trim() : '',
+      oficinaId:   ehRemocao ? f.oficinaId.value : '',
       planoVeiculo: veiculoForm?.plano || '',
       codigoFipe:  veiculoForm?.codigoFipe || '',
       anoModelo:   veiculoForm?.anoModelo || '',
@@ -1201,7 +1481,8 @@ function setupForms() {
         encerrado: false,
         // Evento de vidro já nasce com a peça no comparativo, pronto para cotar com as vidraçarias
         pecas: ehVidro ? [{ id: uid(), nome: dados.pecaVidro, qtd: 1, tipo: 'Original', obs: '', cotacoes: [] }] : [],
-        checklist: { comunicou0800: false, boRealizado: false, cotaPaga: false, termoAssociado: false, termoTerceiro: false },
+        checklist: { comunicou0800: false, boRealizado: false, cotaPaga: false, termoAssociado: false, termoTerceiro: false, veiculoNaOficina: false },
+        ...(ehRemocao ? { remocao: { envios: [], confirmacao: null } } : {}),
         ...dados,
       };
       state.eventos.unshift(novo);
@@ -1265,6 +1546,32 @@ function setupForms() {
   ['pecaVidro', 'coberturaManual', 'data'].forEach(n => fEvt[n].addEventListener('change', atualizarResumoVidro));
   fEvt.valorVidro.addEventListener('input', atualizarResumoVidro);
   document.getElementById('btnFipeHoje').addEventListener('click', () => buscarFipeDoDia());
+
+  // Oficina credenciada
+  document.getElementById('formOficina').addEventListener('submit', e => {
+    e.preventDefault();
+    const f = e.target;
+    state.oficinas = state.oficinas || [];
+    state.oficinas.push({
+      id: uid(),
+      nome:     f.nome.value.trim(),
+      endereco: f.endereco.value.trim(),
+      telefone: f.telefone.value.trim(),
+      contato:  f.contato.value.trim(),
+    });
+    saveState(); f.reset(); renderOficinas();
+    mostrarToast('Oficina cadastrada.');
+  });
+  document.getElementById('btnSalvar0800').addEventListener('click', () => {
+    const v = document.getElementById('wa0800').value.trim();
+    if (v && v.replace(/\D/g, '').length < 10) {
+      mostrarToast('Número do 0800 incompleto — informe com DDD, ex.: (81) 99999-0000.', 'err');
+      return;
+    }
+    state.config = { ...(state.config || {}), whatsapp0800: v };
+    saveState();
+    mostrarToast(v ? 'Contato do 0800 salvo.' : 'Contato do 0800 removido — o WhatsApp vai pedir para escolher o contato.');
+  });
 
   // Fornecedor
   document.getElementById('formFornecedor').addEventListener('submit', e => {
@@ -1678,12 +1985,19 @@ function buscarOnline(eventoId, pecaId) {
 function abrirWhatsApp() {
   if (!waCtx) return;
   const forn = state.fornecedores.find(f => f.id === waCtx.fornId);
-  if (!forn?.whatsapp) return alert('Este fornecedor não tem WhatsApp cadastrado.');
-  const msg = document.getElementById('waPreview').textContent;
-  const tel = forn.whatsapp.replace(/\D/g, '');
-  const num = tel.startsWith('55') ? tel : '55' + tel;
-  window.open(`https://wa.me/${num}?text=${encodeURIComponent(msg)}`, '_blank');
+  const msg = document.getElementById('waPreview').value;
+  // Sem WhatsApp cadastrado, o WhatsApp abre para o atendente escolher o contato
+  window.open(`https://wa.me/${telWhatsApp(forn?.whatsapp)}?text=${encodeURIComponent(msg)}`, '_blank');
   document.getElementById('dlgWhatsApp').close();
+}
+
+async function copiarMsgWA() {
+  try {
+    await navigator.clipboard.writeText(document.getElementById('waPreview').value);
+    mostrarToast('Mensagem copiada.');
+  } catch {
+    mostrarToast('Não consegui copiar automaticamente. Selecione o texto e copie.', 'err');
+  }
 }
 
 // ─── CHAT ────────────────────────────────────────────────────────
@@ -1790,8 +2104,9 @@ function setupListeners() {
   // Templates de mensagem
   // chave do modelo → id do campo no modal "Mensagens"
   const TPL_CAMPOS = {
-    cotacao: 'tplCotacao', atualizacao: 'tplAtualizacao',
+    cotacao: 'tplCotacao', cotacaoVidro: 'tplCotacaoVidro', atualizacao: 'tplAtualizacao',
     vidroCoberto: 'tplVidroCoberto', vidroSemCobertura: 'tplVidroSemCobertura', vidroLimite: 'tplVidroLimite',
+    remocao0800: 'tplRemocao0800', remocaoAssociado: 'tplRemocaoAssociado',
   };
   document.getElementById('btnTemplates')?.addEventListener('click', () => {
     const t = loadTemplates();
@@ -1889,6 +2204,10 @@ function setupListeners() {
 
   // WhatsApp
   document.getElementById('btnAbrirWA')?.addEventListener('click', abrirWhatsApp);
+  document.getElementById('btnCopiarWA')?.addEventListener('click', copiarMsgWA);
+  document.getElementById('btnOficinas')?.addEventListener('click', () => {
+    renderOficinas(); document.getElementById('dlgOficinas').showModal();
+  });
 }
 
 // ─── ATUALIZAÇÕES (timeline) ─────────────────────────────────────
